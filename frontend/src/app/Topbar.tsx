@@ -5,7 +5,7 @@ export function Topbar() {
     <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container h-14 flex items-center justify-between">
         <div className="font-semibold">AI Life Dashboard</div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <ModulePicker />
         </div>
       </div>
