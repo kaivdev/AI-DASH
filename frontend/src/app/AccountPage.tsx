@@ -1,0 +1,273 @@
+import { useAuth } from '@/stores/useAuth'
+import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+
+type Profile = {
+  avatar_url?: string
+  bio?: string
+  phone?: string
+  position?: string
+  website?: string
+  telegram?: string
+  github?: string
+  locale?: string
+}
+
+export function AccountPage() {
+  const user = useAuth((s) => s.user)
+  const token = useAuth((s) => s.token)
+  const me = useAuth((s) => s.me)
+  const logout = useAuth((s) => s.logout)
+  const navigate = useNavigate()
+
+  const [name, setName] = useState(user?.name || '')
+  const [profile, setProfile] = useState<Profile>({
+    avatar_url: user?.profile?.avatar_url || '',
+    bio: user?.profile?.bio || '',
+    phone: user?.profile?.phone || '',
+    position: user?.profile?.position || '',
+    website: user?.profile?.website || '',
+    telegram: user?.profile?.telegram || '',
+    github: user?.profile?.github || '',
+    locale: user?.profile?.locale || '',
+  })
+
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    setName(user?.name || '')
+    setProfile({
+      avatar_url: user?.profile?.avatar_url || '',
+      bio: user?.profile?.bio || '',
+      phone: user?.profile?.phone || '',
+      position: user?.profile?.position || '',
+      website: user?.profile?.website || '',
+      telegram: user?.profile?.telegram || '',
+      github: user?.profile?.github || '',
+      locale: user?.profile?.locale || '',
+    })
+  }, [user])
+
+  if (!user) {
+    navigate('/login')
+    return null
+  }
+
+  async function onSaveProfile() {
+    try {
+      await fetch('http://localhost:8000/api/auth/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ name, profile }),
+      })
+      await me()
+    } catch {}
+  }
+
+  async function onChangePassword() {
+    if (!currentPassword || !newPassword) return
+    try {
+      const resp = await fetch('http://localhost:8000/api/auth/password', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      })
+      if (resp.ok) {
+        setCurrentPassword('')
+        setNewPassword('')
+      }
+    } catch {}
+  }
+
+  async function onPickAvatar(file: File | null) {
+    if (!file) return
+    const formData = new FormData()
+    formData.append('file', file)
+    await fetch('http://localhost:8000/api/auth/avatar', {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      } as any,
+      body: formData,
+    })
+    await me()
+  }
+
+  const initials = (user.name || user.email || 'U')
+    .split(' ')
+    .map(s => s.trim()[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+
+  return (
+    <div className="max-w-6xl mx-auto">
+      <div className="md:flex md:items-start md:gap-12">
+        {/* Left: big avatar */}
+        <div className="md:w-72 w-full mb-6 md:mb-0 flex flex-col items-center">
+          <div className="h-56 w-56 rounded-full bg-muted overflow-hidden flex items-center justify-center text-2xl">
+            {profile.avatar_url ? (
+              <img src={profile.avatar_url} alt="avatar" className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-muted-foreground">{initials}</span>
+            )}
+          </div>
+          <div className="mt-3 text-sm text-muted-foreground break-all text-center">{user.email}</div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => onPickAvatar(e.target.files?.[0] || null)}
+            className="hidden"
+          />
+          <button
+            className="mt-3 h-9 px-4 rounded border text-sm"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Изменить аватар
+          </button>
+        </div>
+
+        {/* Right: forms */}
+        <div className="flex-1 space-y-6">
+          <div className="p-4 border rounded space-y-3">
+            <div>
+              <label className="text-xs mb-1 block">Имя</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="h-9 px-3 rounded border bg-background w-full text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs mb-1 block">Био</label>
+              <textarea
+                value={profile.bio || ''}
+                onChange={(e) => setProfile(p => ({ ...p, bio: e.target.value }))}
+                className="min-h-[120px] px-3 py-2 rounded border bg-background w-full text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs mb-1 block">Телефон</label>
+                <input
+                  value={profile.phone || ''}
+                  onChange={(e) => setProfile(p => ({ ...p, phone: e.target.value }))}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block">Должность</label>
+                <input
+                  value={profile.position || ''}
+                  onChange={(e) => setProfile(p => ({ ...p, position: e.target.value }))}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block">Сайт</label>
+                <input
+                  value={profile.website || ''}
+                  onChange={(e) => setProfile(p => ({ ...p, website: e.target.value }))}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block">Telegram</label>
+                <input
+                  value={profile.telegram || ''}
+                  onChange={(e) => setProfile(p => ({ ...p, telegram: e.target.value }))}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block">GitHub</label>
+                <input
+                  value={profile.github || ''}
+                  onChange={(e) => setProfile(p => ({ ...p, github: e.target.value }))}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block">Язык</label>
+                <input
+                  value={profile.locale || ''}
+                  onChange={(e) => setProfile(p => ({ ...p, locale: e.target.value }))}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                className="h-9 px-4 rounded border text-sm"
+                onClick={() => {
+                  setName(user.name || '')
+                  setProfile({
+                    avatar_url: user?.profile?.avatar_url || '',
+                    bio: user?.profile?.bio || '',
+                    phone: user?.profile?.phone || '',
+                    position: user?.profile?.position || '',
+                    website: user?.profile?.website || '',
+                    telegram: user?.profile?.telegram || '',
+                    github: user?.profile?.github || '',
+                    locale: user?.profile?.locale || '',
+                  })
+                }}
+              >
+                Сбросить
+              </button>
+              <button className="h-9 px-4 rounded border text-sm" onClick={onSaveProfile}>Сохранить</button>
+            </div>
+          </div>
+
+          <div className="p-4 border rounded space-y-3">
+            <div className="font-medium text-sm">Смена пароля</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs mb-1 block">Текущий пароль</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                  placeholder="••••••••"
+                />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block">Новый пароль</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button className="h-9 px-4 rounded border text-sm" onClick={onChangePassword}>Обновить пароль</button>
+            </div>
+          </div>
+
+          <div className="flex justify-end pb-6">
+            <button
+              className="h-9 px-4 rounded border text-sm"
+              onClick={() => { logout(); navigate('/login') }}
+            >
+              Выйти
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+} 

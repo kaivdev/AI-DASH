@@ -1,0 +1,139 @@
+import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import { toast } from 'sonner'
+
+interface AuthProfile {
+  avatar_url?: string
+  bio?: string
+  phone?: string
+  position?: string
+  company?: string
+  website?: string
+  telegram?: string
+  github?: string
+  twitter?: string
+  timezone?: string
+  locale?: string
+}
+
+interface AuthUser {
+  id: string
+  name: string
+  email: string
+  role?: string
+  profile?: AuthProfile
+}
+
+interface AuthState {
+  user: AuthUser | null
+  token: string | null
+  loading: boolean
+  error: string | null
+  login: (email: string, password: string) => Promise<void>
+  register: (email: string, password: string, code: string) => Promise<void>
+  logout: () => void
+  me: () => Promise<void>
+}
+
+function generateId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+const useBackendAuth = typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_AUTH_BACKEND === '1'
+
+export const useAuth = create<AuthState>()(
+  persist(
+    (set, get) => ({
+      user: null,
+      token: null,
+      loading: false,
+      error: null,
+
+      login: async (email, password) => {
+        set({ loading: true, error: null })
+        if (!useBackendAuth) {
+          const fakeUser: AuthUser = { id: generateId(), name: email.split('@')[0] || 'Пользователь', email }
+          const fakeToken = generateId()
+          set({ user: fakeUser, token: fakeToken, loading: false })
+          toast.success('Вход выполнен')
+          return
+        }
+
+        try {
+          const resp = await fetch('http://localhost:8000/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          })
+          if (!resp.ok) {
+            const txt = await resp.text()
+            throw new Error(txt || 'Login failed')
+          }
+          const data = await resp.json()
+          set({ user: data.user, token: data.token, loading: false })
+          toast.success('Добро пожаловать!')
+        } catch (e: any) {
+          set({ loading: false, error: e?.message || 'Login error' })
+          toast.error('Ошибка входа')
+        }
+      },
+
+      register: async (email, password, code) => {
+        set({ loading: true, error: null })
+        if (!useBackendAuth) {
+          if (code !== '667788') {
+            set({ loading: false, error: 'Неверный код' })
+            toast.error('Неверный код')
+            return
+          }
+          const fakeUser: AuthUser = { id: generateId(), name: email.split('@')[0] || 'Пользователь', email }
+          const fakeToken = generateId()
+          set({ user: fakeUser, token: fakeToken, loading: false })
+          toast.success('Регистрация выполнена')
+          return
+        }
+        try {
+          const resp = await fetch('http://localhost:8000/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, code })
+          })
+          if (!resp.ok) {
+            const txt = await resp.text()
+            throw new Error(txt || 'Registration failed')
+          }
+          const data = await resp.json()
+          set({ user: data.user, token: data.token, loading: false })
+          toast.success('Добро пожаловать!')
+        } catch (e: any) {
+          set({ loading: false, error: e?.message || 'Registration error' })
+          toast.error('Ошибка регистрации')
+        }
+      },
+
+      logout: () => {
+        set({ user: null, token: null })
+        toast('Вы вышли из системы')
+      },
+
+      me: async () => {
+        const token = get().token
+        if (!token || !useBackendAuth) return
+        try {
+          const resp = await fetch('http://localhost:8000/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+          if (resp.ok) {
+            const data = await resp.json()
+            set({ user: data })
+          }
+        } catch {}
+      }
+    }),
+    {
+      name: 'ai-life-auth',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (s) => ({ user: s.user, token: s.token })
+    }
+  )
+) 

@@ -17,9 +17,36 @@ const today = new Date()
 const iso = (d: Date) => d.toISOString().slice(0, 10)
 
 const seed: Transaction[] = [
-  { id: generateId(), type: 'income', amount: 1200, date: iso(new Date(today.getFullYear(), today.getMonth(), 1)), category: 'Salary', description: 'Monthly' },
-  { id: generateId(), type: 'expense', amount: 150, date: iso(today), category: 'Groceries', description: 'Market' },
-  { id: generateId(), type: 'expense', amount: 60, date: iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 2)), category: 'Transport' },
+  { 
+    id: generateId(), 
+    type: 'income', 
+    amount: 1200, 
+    date: iso(new Date(today.getFullYear(), today.getMonth(), 1)), 
+    category: 'Salary', 
+    description: 'Monthly', 
+    tags: ['salary', 'monthly'],
+    employeeId: undefined
+  },
+  { 
+    id: generateId(), 
+    type: 'expense', 
+    amount: 150, 
+    date: iso(today), 
+    category: 'Groceries', 
+    description: 'Market',
+    tags: ['groceries', 'food'],
+    employeeId: undefined
+  },
+  { 
+    id: generateId(), 
+    type: 'expense', 
+    amount: 60, 
+    date: iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 2)), 
+    category: 'Transport',
+    description: undefined,
+    tags: ['transport'],
+    employeeId: undefined
+  },
 ]
 
 export const useFinance = create<FinanceState>()(

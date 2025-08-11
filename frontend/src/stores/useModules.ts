@@ -39,7 +39,7 @@ interface ModulesState {
 }
 
 function defaultSizeFor(key: ModuleKey): EnabledModule['size'] {
-  if (key === 'finance') return '2x2'
+  if (key === 'finance' || key === 'employees' || key === 'projects' || key === 'goals' || key === 'reading') return '2x2'
   if (key === 'notes' || key === 'tasks') return '2x1'
   return '1x1'
 }
@@ -52,7 +52,16 @@ function defaultRowSpanForSize(size: EnabledModule['size']): number {
 export const useModules = create<ModulesState>()(
   persist(
     (set, get) => ({
-      enabled: [{ key: 'metrics', size: '1x1', order: 0, rowSpan: 1 }],
+      enabled: [
+        { key: 'metrics', size: '1x1', order: 0, rowSpan: 1 },
+        { key: 'finance', size: '2x2', order: 1, rowSpan: 2 },
+        { key: 'employees', size: '2x2', order: 2, rowSpan: 2 },
+        { key: 'projects', size: '2x2', order: 3, rowSpan: 2 },
+        { key: 'tasks', size: '2x2', order: 4, rowSpan: 2 },
+        { key: 'goals', size: '2x2', order: 5, rowSpan: 2 },
+        { key: 'reading', size: '2x2', order: 6, rowSpan: 2 },
+        { key: 'notes', size: '2x1', order: 7, rowSpan: 1 }
+      ],
       disabled: [],
       enable: (key) =>
         set((state) => {

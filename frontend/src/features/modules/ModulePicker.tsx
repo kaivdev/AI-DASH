@@ -135,9 +135,9 @@ export function ModulePicker() {
         ref={btnRef}
         className="h-8 px-3 rounded border bg-background"
         onClick={handleToggle}
-        title="Modules"
+        title="Модули"
       >
-        Modules
+        Модули
       </button>
 
       {open && (
@@ -158,8 +158,8 @@ export function ModulePicker() {
               className="flex items-center justify-between px-4 py-3 border-b cursor-move select-none bg-muted/50" 
               data-role="mp-header"
             >
-              <div className="font-medium">Modules</div>
-              <div className="text-xs text-muted-foreground">Drag to move • Resize corner</div>
+              <div className="font-medium">Модули</div>
+              <div className="text-xs text-muted-foreground">Переместите заголовок • Потяните угол</div>
             </div>
             <div className="p-4 space-y-2">
               {Object.keys(registry).map((key) => {

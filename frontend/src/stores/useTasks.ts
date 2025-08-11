@@ -1,47 +1,190 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Task, Priority } from '@/types/core'
+import { taskApi } from '@/lib/api'
 
 interface TasksState {
   tasks: Task[]
-  add: (content: string, priority?: Priority, due?: string) => void
-  toggle: (id: string) => void
-  update: (id: string, patch: Partial<Omit<Task, 'id'>>) => void
-  remove: (id: string) => void
+  loading: boolean
+  error: string | null
+  fetchTasks: () => Promise<void>
+  add: (task: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => Promise<void>
+  toggle: (id: string) => Promise<void>
+  update: (id: string, patch: Partial<Omit<Task, 'id' | 'created_at' | 'updated_at'>>) => Promise<void>
+  remove: (id: string) => Promise<void>
 }
 
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
+// Миграция сохраненных данных старого формата в новый
+function migrateTasks(raw: any): Task[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((t: any) => ({
+    id: t.id,
+    content: t.content,
+    priority: t.priority,
+    due_date: t.due ?? t.due_date ?? undefined,
+    done: !!t.done,
+    assigned_to: t.assignedTo ?? t.assigned_to ?? undefined,
+    project_id: t.projectId ?? t.project_id ?? undefined,
+    created_at: t.created_at ?? new Date().toISOString(),
+    updated_at: t.updated_at ?? new Date().toISOString(),
+  }))
+}
+
 const seed: Task[] = [
-  { id: generateId(), content: 'Try enabling Metrics module', priority: 'M', done: true },
-  { id: generateId(), content: 'Add your first Note', priority: 'M', done: false },
-  { id: generateId(), content: 'Plan week tasks', priority: 'H', due: new Date().toISOString().slice(0,10), done: false },
+  { 
+    id: generateId(), 
+    content: 'Попробовать новый модуль Metrics', 
+    priority: 'M', 
+    done: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  },
+  { 
+    id: generateId(), 
+    content: 'Добавить первую заметку', 
+    priority: 'M', 
+    done: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  },
+  { 
+    id: generateId(), 
+    content: 'Спланировать задачи на неделю', 
+    priority: 'H', 
+    due_date: new Date().toISOString().slice(0,10), 
+    done: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  },
 ]
 
 export const useTasks = create<TasksState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       tasks: seed,
-      add: (content, priority = 'M', due) =>
-        set((state) => ({
-          tasks: [
-            { id: generateId(), content, priority, due, done: false },
-            ...state.tasks,
-          ],
-        })),
-      toggle: (id) =>
-        set((state) => ({
-          tasks: state.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
-        })),
-      update: (id, patch) =>
-        set((state) => ({
-          tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-        })),
-      remove: (id) =>
-        set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
+      loading: false,
+      error: null,
+
+      fetchTasks: async () => {
+        // Загружаем с сервера только если локально пусто
+        if (get().tasks && get().tasks.length > 0) return
+        set({ loading: true, error: null })
+        try {
+          const tasks = await taskApi.getAll() as Task[]
+          if (Array.isArray(tasks) && tasks.length > 0) {
+            set({ tasks, loading: false })
+          } else {
+            set({ loading: false })
+          }
+        } catch (error) {
+          console.error('Failed to fetch tasks:', error)
+          set({ error: 'Failed to fetch tasks', loading: false })
+        }
+      },
+
+      add: async (task) => {
+        set({ loading: true, error: null })
+        try {
+          const apiData = {
+            content: task.content,
+            priority: task.priority,
+            due_date: task.due_date || null,
+            done: task.done,
+            assigned_to: task.assigned_to || null,
+            project_id: task.project_id || null
+          }
+          
+          const newTask = await taskApi.create(apiData) as Task
+          set((state) => ({
+            tasks: [newTask, ...state.tasks],
+            loading: false
+          }))
+        } catch (error) {
+          console.error('Failed to create task:', error)
+          const localTask: Task = {
+            id: generateId(),
+            ...task,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+          set((state) => ({
+            tasks: [localTask, ...state.tasks],
+            loading: false,
+            error: 'Added locally (API unavailable)'
+          }))
+        }
+      },
+
+      toggle: async (id) => {
+        set({ loading: true, error: null })
+        try {
+          const updatedTask = await taskApi.toggle(id) as Task
+          set((state) => ({
+            tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
+            loading: false
+          }))
+        } catch (error) {
+          console.error('Failed to toggle task:', error)
+          set((state) => ({
+            tasks: state.tasks.map((t) => (t.id === id ? { ...t, done: !t.done, updated_at: new Date().toISOString() } : t)),
+            loading: false,
+            error: 'Updated locally (API unavailable)'
+          }))
+        }
+      },
+
+      update: async (id, patch) => {
+        set({ loading: true, error: null })
+        try {
+          const updatedTask = await taskApi.update(id, patch) as Task
+          set((state) => ({
+            tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
+            loading: false
+          }))
+        } catch (error) {
+          console.error('Failed to update task:', error)
+          set((state) => ({
+            tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...patch, updated_at: new Date().toISOString() } : t)),
+            loading: false,
+            error: 'Updated locally (API unavailable)'
+          }))
+        }
+      },
+
+      remove: async (id) => {
+        set({ loading: true, error: null })
+        try {
+          await taskApi.delete(id)
+          set((state) => ({
+            tasks: state.tasks.filter((t) => t.id !== id),
+            loading: false
+          }))
+        } catch (error) {
+          console.error('Failed to delete task:', error)
+          set((state) => ({
+            tasks: state.tasks.filter((t) => t.id !== id),
+            loading: false,
+            error: 'Deleted locally (API unavailable)'
+          }))
+        }
+      }
     }),
-    { name: 'ai-life-tasks' }
+    { 
+      name: 'ai-life-tasks',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ tasks: state.tasks }),
+      // миграция сохраненных данных
+      migrate: (persistedState: any, version: number) => {
+        if (!persistedState) return { tasks: seed }
+        if (Array.isArray(persistedState.tasks)) {
+          return { ...persistedState, tasks: migrateTasks(persistedState.tasks) }
+        }
+        return persistedState
+      }
+    }
   )
 ) 
