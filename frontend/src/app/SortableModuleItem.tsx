@@ -19,6 +19,7 @@ export function SortableModuleItem({
     transition,
     zIndex: isDragging ? 50 : undefined,
     cursor: isDragging ? 'grabbing' : 'grab',
+    willChange: isDragging ? 'transform' as const : undefined,
   } as React.CSSProperties
 
   return (
@@ -29,7 +30,6 @@ export function SortableModuleItem({
       className={cn(
         'min-h-0 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         'hover:shadow-lg transition',
-        'transform-gpu will-change-transform',
         isDragging && 'opacity-0',
         className
       )}

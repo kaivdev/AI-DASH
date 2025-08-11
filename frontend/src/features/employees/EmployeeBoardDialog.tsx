@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Employee } from '@/types/core'
 
 interface EmployeeBoardDialogProps {
@@ -27,7 +28,17 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
   const [newStatus, setNewStatus] = useState('')
   const [statusTag, setStatusTag] = useState('')
 
-  useEffect(() => { if (open) setShow(true); else { const t = setTimeout(() => setShow(false), 200); return () => clearTimeout(t) } }, [open])
+  useEffect(() => {
+    if (open) {
+      setShow(true)
+      const prev = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => { document.body.style.overflow = prev }
+    } else {
+      const t = setTimeout(() => setShow(false), 200)
+      return () => clearTimeout(t)
+    }
+  }, [open])
 
   async function onQuickAdd() {
     if (!name.trim() || !position.trim()) return
@@ -63,7 +74,7 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
   const positions = Array.from(new Set(employees.map(e => e.position))).filter(Boolean)
   const statuses = Array.from(new Set(employees.map(e => e.current_status))).filter(Boolean)
 
-  return (
+  const node = (
     <div className="fixed inset-0 z-50">
       <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`} onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-6">
@@ -93,7 +104,7 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
                 <option value="">Все должности</option>
                 {positions.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
-              <select className="h-9 px-3 rounded border bg-background text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <select className="h-9 px-3 rounded border bg-background text_sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                 <option value="">Все статусы</option>
                 {statuses.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -102,7 +113,7 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
             <div className="border-t border-dashed" />
 
             {/* List */}
-            <div className="max-h-[60vh] overflow-auto border rounded">
+            <div className="max-h_[60vh] overflow-auto border rounded">
               {filtered.map((e) => (
                 <div key={e.id} className="px-3 py-3 border-b last:border-b-0">
                   <div className="flex items-start justify-between gap-3">
@@ -117,7 +128,7 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
                     <span>{e.current_status}</span>
                     {e.status_tag && (<span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800">{e.status_tag}</span>)}
                   </div>
-                  <div className="mt-2 flex items-center gap-2 text-xs">
+                  <div className="mt-2 flex items_center gap-2 text-xs">
                     <input className="h-7 px-2 rounded border bg-background text-xs" placeholder="Новый статус" value={statusId===e.id?newStatus:''} onChange={(ev)=>{setStatusId(e.id); setNewStatus(ev.target.value)}} />
                     <input className="h-7 px-2 rounded border bg-background text-xs w-24" placeholder="Тег" value={statusId===e.id?statusTag:''} onChange={(ev)=>{setStatusId(e.id); setStatusTag(ev.target.value)}} />
                     <button className="h-7 px-2 rounded border text-xs" disabled={statusId!==e.id || !newStatus.trim()} onClick={()=> onUpdateStatus(e.id, newStatus.trim(), statusTag.trim()||undefined)}>↑</button>
@@ -131,4 +142,6 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
       </div>
     </div>
   )
+
+  return createPortal(node, document.body)
 } 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Task, Priority } from '@/types/core'
 
 interface TaskBoardDialogProps {
@@ -37,6 +38,11 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
   useEffect(() => {
     if (open) {
       setShow(true)
+      const prev = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => {
+        document.body.style.overflow = prev
+      }
     } else {
       const t = setTimeout(() => setShow(false), 200)
       return () => clearTimeout(t)
@@ -108,7 +114,7 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
 
   if (!open && !show) return null
 
-  return (
+  const node = (
     <div className="fixed inset-0 z-50">
       <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`} onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-6">
@@ -249,4 +255,6 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
       </div>
     </div>
   )
+
+  return createPortal(node, document.body)
 } 
