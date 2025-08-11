@@ -7,7 +7,8 @@ interface ProjectsState {
   add: (project: Omit<Project, 'id'>) => void
   update: (id: string, patch: Partial<Omit<Project, 'id'>>) => void
   remove: (id: string) => void
-  addLink: (projectId: string, link: Omit<ProjectLink, 'id'>) => void
+  addLink: (projectId: string, link: Omit<ProjectLink, 'id' | 'project_id' | 'created_at'>) => void
+  updateLink: (projectId: string, linkId: string, patch: Partial<Omit<ProjectLink, 'id' | 'project_id' | 'created_at'>>) => void
   removeLink: (projectId: string, linkId: string) => void
   addMember: (projectId: string, employeeId: string) => void
   removeMember: (projectId: string, employeeId: string) => void
@@ -26,21 +27,26 @@ const seed: Project[] = [
     links: [
       {
         id: generateId(),
+        project_id: 'seed',
         title: 'GitHub Repository',
         url: 'https://github.com/company/dashboard',
-        type: 'repo'
+        link_type: 'repo',
+        created_at: new Date().toISOString(),
       },
       {
         id: generateId(),
+        project_id: 'seed',
         title: 'Figma Design',
         url: 'https://figma.com/design/dashboard',
-        type: 'design'
+        link_type: 'design',
+        created_at: new Date().toISOString(),
       }
     ],
-    memberIds: [],
+    member_ids: [],
     status: 'active',
-    startDate: new Date().toISOString().slice(0, 10)
-  }
+    start_date: new Date().toISOString().slice(0, 10),
+    created_at: new Date().toISOString(),
+  } as unknown as Project
 ]
 
 export const useProjects = create<ProjectsState>()(
@@ -48,11 +54,11 @@ export const useProjects = create<ProjectsState>()(
     (set) => ({
       projects: seed,
       add: (project) => set((state) => ({ 
-        projects: [{ id: generateId(), ...project }, ...state.projects] 
+        projects: [{ id: generateId(), ...(project as any) }, ...state.projects] 
       })),
       update: (id, patch) =>
         set((state) => ({ 
-          projects: state.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) 
+          projects: state.projects.map((p) => (p.id === id ? { ...p, ...(patch as any) } : p)) 
         })),
       remove: (id) => set((state) => ({ 
         projects: state.projects.filter((p) => p.id !== id) 
@@ -61,7 +67,18 @@ export const useProjects = create<ProjectsState>()(
         set((state) => ({
           projects: state.projects.map((p) =>
             p.id === projectId
-              ? { ...p, links: [...p.links, { id: generateId(), ...link }] }
+              ? { ...p, links: [...p.links, { id: generateId(), project_id: projectId, created_at: new Date().toISOString(), ...(link as any) }] as any }
+              : p
+          )
+        })),
+      updateLink: (projectId, linkId, patch) =>
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === projectId
+              ? {
+                  ...p,
+                  links: p.links.map((l: any) => (l.id === linkId ? { ...l, ...(patch as any) } : l)) as any,
+                }
               : p
           )
         })),
@@ -69,23 +86,23 @@ export const useProjects = create<ProjectsState>()(
         set((state) => ({
           projects: state.projects.map((p) =>
             p.id === projectId
-              ? { ...p, links: p.links.filter((l) => l.id !== linkId) }
+              ? { ...p, links: p.links.filter((l: any) => l.id !== linkId) as any }
               : p
           )
         })),
       addMember: (projectId, employeeId) =>
         set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === projectId && !p.memberIds.includes(employeeId)
-              ? { ...p, memberIds: [...p.memberIds, employeeId] }
+          projects: state.projects.map((p: any) =>
+            p.id === projectId && !p.member_ids?.includes(employeeId)
+              ? { ...p, member_ids: [...(p.member_ids ?? []), employeeId] }
               : p
           )
         })),
       removeMember: (projectId, employeeId) =>
         set((state) => ({
-          projects: state.projects.map((p) =>
+          projects: state.projects.map((p: any) =>
             p.id === projectId
-              ? { ...p, memberIds: p.memberIds.filter((id) => id !== employeeId) }
+              ? { ...p, member_ids: (p.member_ids ?? []).filter((id: string) => id !== employeeId) }
               : p
           )
         }))

@@ -7,7 +7,7 @@ interface TasksState {
   tasks: Task[]
   loading: boolean
   error: string | null
-  fetchTasks: () => Promise<void>
+  fetchTasks: (force?: boolean) => Promise<void>
   add: (task: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => Promise<void>
   toggle: (id: string) => Promise<void>
   update: (id: string, patch: Partial<Omit<Task, 'id' | 'created_at' | 'updated_at'>>) => Promise<void>
@@ -69,13 +69,13 @@ export const useTasks = create<TasksState>()(
       loading: false,
       error: null,
 
-      fetchTasks: async () => {
-        // Загружаем с сервера только если локально пусто
-        if (get().tasks && get().tasks.length > 0) return
+      fetchTasks: async (force = false) => {
+        // Если не принудительно и локально есть данные — не грузим
+        if (!force && get().tasks && get().tasks.length > 0) return
         set({ loading: true, error: null })
         try {
           const tasks = await taskApi.getAll() as Task[]
-          if (Array.isArray(tasks) && tasks.length > 0) {
+          if (Array.isArray(tasks)) {
             set({ tasks, loading: false })
           } else {
             set({ loading: false })

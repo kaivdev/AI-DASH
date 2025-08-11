@@ -32,7 +32,7 @@ export function ModuleCard({
   return (
     <div className={cn('h-full rounded-lg border bg-card text-card-foreground shadow-sm flex flex-col')}> 
       <div className="flex items-center justify-between px-4 py-2 border-b">
-        <div className="font-medium truncate">{title}</div>
+        <button className="font-medium truncate hover:underline" onClick={() => window.dispatchEvent(new CustomEvent('module-title-click', { detail: { id } }))}>{title}</button>
         <div className="flex items-center gap-2 text-sm relative">
           <button className="px-2 py-1 rounded border" onClick={() => reorder(id, 'up')}>↑</button>
           <button className="px-2 py-1 rounded border" onClick={() => reorder(id, 'down')}>↓</button>

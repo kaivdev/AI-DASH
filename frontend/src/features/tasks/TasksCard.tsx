@@ -6,6 +6,8 @@ import { formatDate } from '@/lib/format'
 import { useMemo, useState, useEffect } from 'react'
 import type { Task, Priority } from '@/types/core'
 import { ConfirmDialog } from '@/app/ConfirmDialog'
+import { TaskDetailDialog } from './TaskDetailDialog'
+import { TaskBoardDialog } from './TaskBoardDialog'
 
 const priorityColors: Record<Priority, string> = {
   L: 'border-green-300',
@@ -26,9 +28,10 @@ interface TaskItemProps {
   onToggle: (id: string) => void
   onDelete: (id: string) => void
   onEdit: (task: Task) => void
+  onOpen: (task: Task) => void
 }
 
-function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit }: TaskItemProps) {
+function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpen }: TaskItemProps) {
   const employee = task.assigned_to ? employees.find(e => e.id === task.assigned_to) : null
   const project = task.project_id ? projects.find(p => p.id === task.project_id) : null
   
@@ -45,9 +48,12 @@ function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit }: Tas
           className="mt-1"
         />
         <div className="flex-1">
-          <div className={`${task.done ? 'line-through text-muted-foreground' : ''}`}>
+          <button
+            className={`text-left w-full ${task.done ? 'line-through text-muted-foreground' : ''}`}
+            onClick={() => onOpen(task)}
+          >
             {task.content}
-          </div>
+          </button>
           <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground">
             <span className="px-2 py-1 bg-gray-100 rounded">
               {priorityLabels[task.priority]}
@@ -110,15 +116,28 @@ export function TasksCard() {
   const [due, setDue] = useState('')
   const [assignedTo, setAssignedTo] = useState('')
   const [projectId, setProjectId] = useState('')
+
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailTask, setDetailTask] = useState<Task | null>(null)
+  const [headerDetailOpen, setHeaderDetailOpen] = useState(false)
 
   // Load data on mount
   useEffect(() => {
     fetchTasks()
     fetchEmployees()
-    // fetchProjects() - will add when we update projects store
+    // fetchProjects()
   }, [fetchTasks, fetchEmployees])
+
+  useEffect(() => {
+    function onTitleClick(e: any) {
+      if (e?.detail?.id === 'tasks') setHeaderDetailOpen(true)
+    }
+    window.addEventListener('module-title-click', onTitleClick as any)
+    return () => window.removeEventListener('module-title-click', onTitleClick as any)
+  }, [])
 
   const today = new Date().toISOString().slice(0, 10)
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
@@ -166,6 +185,11 @@ export function TasksCard() {
     setAssignedTo(task.assigned_to || '')
     setProjectId(task.project_id || '')
     setShowForm(true)
+  }
+
+  function openDetail(task: Task) {
+    setDetailTask(task)
+    setDetailOpen(true)
   }
 
   async function onSubmit() {
@@ -224,6 +248,31 @@ export function TasksCard() {
             setPendingDeleteId(null)
           }}
         />
+
+        <TaskDetailDialog
+          open={detailOpen}
+          task={detailTask}
+          employeeName={detailTask?.assigned_to ? employees.find(e => e.id === detailTask?.assigned_to)?.name ?? null : null}
+          projectName={detailTask?.project_id ? projects.find(p => p.id === detailTask?.project_id)?.name ?? null : null}
+          onClose={() => setDetailOpen(false)}
+          onEdit={(t) => { startEdit(t); setDetailOpen(false) }}
+          onToggle={(id) => onToggle(id)}
+          onDelete={(id) => { setDetailOpen(false); onDelete(id) }}
+        />
+
+        <TaskBoardDialog
+          open={headerDetailOpen}
+          tasks={tasks}
+          employees={employees}
+          projects={projects}
+          onClose={() => setHeaderDetailOpen(false)}
+          onOpenDetail={(t) => { setDetailTask(t); setDetailOpen(true); }}
+          onStartEdit={(t) => { startEdit(t); setHeaderDetailOpen(false) }}
+          onToggle={onToggle}
+          onDelete={onDelete}
+          onAdd={add}
+        />
+
         <div className="flex items-center gap-2">
           <button
             className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground"
@@ -330,6 +379,7 @@ export function TasksCard() {
                       onToggle={onToggle}
                       onDelete={onDelete}
                       onEdit={startEdit}
+                      onOpen={openDetail}
                     />
                   ))}
                 </div>
@@ -349,6 +399,7 @@ export function TasksCard() {
                       onToggle={onToggle}
                       onDelete={onDelete}
                       onEdit={startEdit}
+                      onOpen={openDetail}
                     />
                   ))}
                 </div>
@@ -368,6 +419,7 @@ export function TasksCard() {
                       onToggle={onToggle}
                       onDelete={onDelete}
                       onEdit={startEdit}
+                      onOpen={openDetail}
                     />
                   ))}
                 </div>
@@ -387,6 +439,7 @@ export function TasksCard() {
                       onToggle={onToggle}
                       onDelete={onDelete}
                       onEdit={startEdit}
+                      onOpen={openDetail}
                     />
                   ))}
                 </div>
@@ -406,6 +459,7 @@ export function TasksCard() {
                       onToggle={onToggle}
                       onDelete={onDelete}
                       onEdit={startEdit}
+                      onOpen={openDetail}
                     />
                   ))}
                 </div>
@@ -425,11 +479,13 @@ export function TasksCard() {
                       onToggle={onToggle}
                       onDelete={onDelete}
                       onEdit={startEdit}
+                      onOpen={openDetail}
                     />
                   ))}
                 </div>
               </div>
             )}
+
           </div>
         </div>
       </div>

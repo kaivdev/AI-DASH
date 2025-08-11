@@ -4,6 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
+import requests
+from datetime import datetime, timedelta, date
 
 import models
 import schemas
@@ -30,6 +32,9 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 AVATAR_DIR = os.path.join(UPLOAD_DIR, "avatars")
 os.makedirs(AVATAR_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 
 @app.on_event("startup")
 def startup_seed():
@@ -392,6 +397,204 @@ def delete_note(note_id: str, db: Session = Depends(get_db)):
     if crud.delete_note(db, note_id):
         return {"message": "Note deleted successfully"}
     raise HTTPException(status_code=404, detail="Note not found")
+
+# --- AI command endpoint ---
+def _call_ollama(prompt: str) -> str:
+    errors: list[str] = []
+    # 1) Ollama generate
+    try:
+        r = requests.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=120,
+        )
+        if r.ok:
+            j = r.json()
+            if isinstance(j, dict) and j.get("response"):
+                return j["response"]
+        else:
+            errors.append(f"generate {r.status_code}")
+    except Exception as e:
+        errors.append(f"generate {e}")
+
+    # 2) Ollama chat
+    try:
+        r = requests.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+            },
+            timeout=120,
+        )
+        if r.ok:
+            j = r.json()
+            if isinstance(j, dict):
+                if j.get("message") and j["message"].get("content"):
+                    return j["message"]["content"]
+                if j.get("response"):
+                    return j["response"]
+        else:
+            errors.append(f"chat {r.status_code}")
+    except Exception as e:
+        errors.append(f"chat {e}")
+
+    # 3) OpenAI-compatible chat (LM Studio): /v1/chat/completions
+    try:
+        r = requests.post(
+            f"{OLLAMA_URL}/v1/chat/completions",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+            },
+            timeout=120,
+        )
+        if r.ok:
+            j = r.json()
+            if isinstance(j, dict) and j.get("choices"):
+                content = j["choices"][0]["message"]["content"]
+                return content
+        else:
+            errors.append(f"v1/chat {r.status_code}")
+    except Exception as e:
+        errors.append(f"v1/chat {e}")
+
+    # 4) OpenAI-compatible completions: /v1/completions (если модель текстовая)
+    try:
+        r = requests.post(
+            f"{OLLAMA_URL}/v1/completions",
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=120,
+        )
+        if r.ok:
+            j = r.json()
+            if isinstance(j, dict) and j.get("choices"):
+                return j["choices"][0]["text"]
+        else:
+            errors.append(f"v1/compl {r.status_code}")
+    except Exception as e:
+        errors.append(f"v1/compl {e}")
+
+    raise HTTPException(status_code=500, detail=f"LLM error: {'; '.join(errors) or 'unknown'}")
+
+def _parse_date(text: str) -> Optional[date]:
+    t = text.strip().lower()
+    today = date.today()
+    if t in ("сегодня", "today"): return today
+    if t in ("завтра", "tomorrow"): return today + timedelta(days=1)
+    # ISO-like
+    try:
+        return datetime.fromisoformat(t).date()
+    except Exception:
+        return None
+
+@app.post("/api/ai/command", response_model=schemas.AIChatResponse)
+def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db)):
+    system = (
+        "Ты помощник-оператор. Преобразуй текст пользователя в JSON с полями: "
+        "intent (add_task|update_task|summary|overdue|finance), content, assignee, priority (L|M|H), due, project, done (true|false). "
+        "Если это сводка задач, intent=summary и добавь поле period (today|week). "
+        "Если речь о просроченных задачах — intent=overdue. Если о финансах за месяц — intent=finance и добавь поле month ('2025-08'). Только JSON."
+    )
+    user = payload.query
+    prompt = f"{system}\nUSER: {user}\nJSON:"
+    raw = _call_ollama(prompt)
+    # «Обрезать» возможный текст до JSON
+    import json, re
+    match = re.search(r"\{[\s\S]*\}", raw)
+    data = {}
+    if match:
+        try:
+            data = json.loads(match.group(0))
+        except Exception:
+            data = {}
+    intent = (data.get("intent") or "").lower()
+    actions: List[str] = []
+    created: List[str] = []
+
+    if intent == "add_task":
+        content = data.get("content") or payload.query
+        priority = (data.get("priority") or "M").upper()
+        if priority not in ("L","M","H"): priority = "M"
+        due = _parse_date(str(data.get("due") or ""))
+        assignee_name = data.get("assignee")
+        assignee_id = None
+        if assignee_name:
+            emp = crud.find_employee_by_name(db, assignee_name)
+            assignee_id = emp.id if emp else None
+        project_id = None
+        # простая привязка проекта по названию
+        proj_name = data.get("project")
+        if proj_name:
+            projects = crud.get_projects(db)
+            for p in projects:
+                if proj_name.lower() in p.name.lower():
+                    project_id = p.id
+                    break
+        task = crud.create_task_simple(db, content=content, priority=priority, due_date=due, assigned_to=assignee_id, project_id=project_id)
+        actions.append(f"Создана задача: {task.content}")
+        created.append(task.id)
+        summary = f"Создана задача ‘{task.content}’ (приоритет {priority}{', срок ' + task.due_date.isoformat() if task.due_date else ''})."
+        return {"result": {"summary": summary, "actions": actions, "created_task_ids": created}}
+
+    if intent == "summary":
+        period = (data.get("period") or "today").lower()
+        tasks = crud.get_tasks(db)
+        today = date.today().isoformat()
+        if period == "today":
+            tasks = [t for t in tasks if (t.due_date and t.due_date.isoformat()==today) or (t.created_at and t.created_at.date().isoformat()==today)]
+        summary = f"Найдено задач: {len(tasks)}. " + "; ".join([t.content for t in tasks[:10]])
+        return {"result": {"summary": summary, "actions": [], "created_task_ids": []}}
+
+    if intent == "overdue":
+        over = crud.list_overdue_tasks(db)
+        if not over:
+            return {"result": {"summary": "Просроченных задач нет", "actions": [], "created_task_ids": []}}
+        lines = [f"{t.content} (срок {t.due_date.isoformat()})" for t in over[:10]]
+        summary = "Просроченные задачи: " + "; ".join(lines)
+        return {"result": {"summary": summary, "actions": [], "created_task_ids": []}}
+
+    if intent == "update_task":
+        # Простое обновление по содержимому
+        target = crud.find_task_by_text(db, data.get("content") or "")
+        if not target:
+            return {"result": {"summary": "Задача не найдена", "actions": [], "created_task_ids": []}}
+        # done toggle or set
+        if data.get("done") is True:
+            target.done = True
+        elif data.get("done") is False:
+            target.done = False
+        # update due/priority
+        d = _parse_date(str(data.get("due") or ""))
+        if d: target.due_date = d
+        pr = (data.get("priority") or "").upper()
+        if pr in ("L","M","H"): target.priority = pr
+        db.commit(); db.refresh(target)
+        return {"result": {"summary": f"Обновлена задача ‘{target.content}’", "actions": ["Обновлена задача"], "created_task_ids": []}}
+
+    if intent == "finance":
+        # month like YYYY-MM
+        month = (data.get("month") or "").strip()
+        try:
+            y, m = month.split("-")
+            y, m = int(y), int(m)
+        except Exception:
+            today = date.today()
+            y, m = today.year, today.month
+        s = crud.finance_summary_month(db, y, m)
+        summary = f"Финансы {y}-{m:02d}: доход {s['income']:.2f}, расход {s['expense']:.2f}, баланс {s['balance']:.2f}."
+        return {"result": {"summary": summary, "actions": [], "created_task_ids": []}}
+
+    # fallback: просто эхо-ответ
+    return {"result": {"summary": raw.strip()[:800], "actions": [], "created_task_ids": []}}
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from typing import List, Optional
 import uuid
 from datetime import date, datetime
@@ -119,6 +119,13 @@ def get_user_by_token(db: Session, token: str) -> Optional[models.User]:
 # Employee CRUD
 def get_employees(db: Session) -> List[models.Employee]:
     return db.query(models.Employee).all()
+
+def find_employee_by_name(db: Session, name: str) -> Optional[models.Employee]:
+    if not name:
+        return None
+    # simple case-insensitive containment
+    q = db.query(models.Employee).filter(models.Employee.name.ilike(f"%{name}%")).first()
+    return q
 
 def get_employee(db: Session, employee_id: str) -> Optional[models.Employee]:
     return db.query(models.Employee).filter(models.Employee.id == employee_id).first()
@@ -255,6 +262,23 @@ def remove_project_link(db: Session, project_id: str, link_id: str) -> bool:
 def get_transactions(db: Session) -> List[models.Transaction]:
     return db.query(models.Transaction).order_by(models.Transaction.date.desc()).all()
 
+def finance_summary_month(db: Session, year: int, month: int) -> dict:
+    inc = (
+        db.query(func.coalesce(func.sum(models.Transaction.amount), 0.0))
+        .filter(models.Transaction.transaction_type == "income")
+        .filter(func.strftime('%Y', models.Transaction.date) == str(year))
+        .filter(func.strftime('%m', models.Transaction.date) == f"{month:02d}")
+        .scalar()
+    )
+    exp = (
+        db.query(func.coalesce(func.sum(models.Transaction.amount), 0.0))
+        .filter(models.Transaction.transaction_type == "expense")
+        .filter(func.strftime('%Y', models.Transaction.date) == str(year))
+        .filter(func.strftime('%m', models.Transaction.date) == f"{month:02d}")
+        .scalar()
+    )
+    return {"income": float(inc or 0), "expense": float(exp or 0), "balance": float((inc or 0) - (exp or 0))}
+
 def get_transaction(db: Session, transaction_id: str) -> Optional[models.Transaction]:
     return db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
 
@@ -289,6 +313,37 @@ def delete_transaction(db: Session, transaction_id: str) -> bool:
 # Task CRUD
 def get_tasks(db: Session) -> List[models.Task]:
     return db.query(models.Task).order_by(models.Task.created_at.desc()).all()
+
+def find_task_by_text(db: Session, text: str) -> Optional[models.Task]:
+    if not text:
+        return None
+    return db.query(models.Task).filter(models.Task.content.ilike(f"%{text}%")).first()
+
+def list_overdue_tasks(db: Session) -> List[models.Task]:
+    today = date.today()
+    return (
+        db.query(models.Task)
+        .filter(models.Task.due_date.isnot(None))
+        .filter(models.Task.due_date < today)
+        .filter(models.Task.done == False)
+        .order_by(models.Task.due_date.asc())
+        .all()
+    )
+
+def create_task_simple(db: Session, content: str, priority: str = "M", due_date: Optional[date] = None, assigned_to: Optional[str] = None, project_id: Optional[str] = None) -> models.Task:
+    db_task = models.Task(
+        id=generate_id(),
+        content=content,
+        priority=priority,
+        due_date=due_date,
+        done=False,
+        assigned_to=assigned_to,
+        project_id=project_id,
+    )
+    db.add(db_task)
+    db.commit()
+    db.refresh(db_task)
+    return db_task
 
 def get_task(db: Session, task_id: str) -> Optional[models.Task]:
     return db.query(models.Task).filter(models.Task.id == task_id).first()

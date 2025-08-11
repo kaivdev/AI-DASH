@@ -302,4 +302,17 @@ class UserUpdate(BaseModel):
 
 class PasswordChange(BaseModel):
     current_password: str
-    new_password: str 
+    new_password: str
+
+# --- AI command schemas ---
+class AICommandRequest(BaseModel):
+    query: str
+    user_id: Optional[str] = None
+
+class AICommandResult(BaseModel):
+    summary: str
+    actions: List[str] = []
+    created_task_ids: List[str] = []
+
+class AIChatResponse(BaseModel):
+    result: AICommandResult 

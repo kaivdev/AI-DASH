@@ -2,6 +2,7 @@ import { ModuleCard } from '@/features/modules/ModuleCard'
 import { useEmployees } from '@/stores/useEmployees'
 import { formatCurrency } from '@/lib/format'
 import { useEffect, useState } from 'react'
+import { EmployeeBoardDialog } from './EmployeeBoardDialog'
 
 export function EmployeesCard() {
   const employees = useEmployees((s) => s.employees)
@@ -21,9 +22,19 @@ export function EmployeesCard() {
   const [newStatus, setNewStatus] = useState('')
   const [statusTag, setStatusTag] = useState('')
 
+  const [boardOpen, setBoardOpen] = useState(false)
+
   useEffect(() => {
     fetchEmployees()
   }, [fetchEmployees])
+
+  useEffect(() => {
+    function onTitleClick(e: any) {
+      if (e?.detail?.id === 'employees') setBoardOpen(true)
+    }
+    window.addEventListener('module-title-click', onTitleClick as any)
+    return () => window.removeEventListener('module-title-click', onTitleClick as any)
+  }, [])
 
   async function onAdd() {
     if (!name.trim() || !position.trim()) return
@@ -36,7 +47,7 @@ export function EmployeesCard() {
       current_status: 'Новый сотрудник',
       status_tag: undefined,
       status_date: new Date().toISOString().slice(0, 10),
-    })
+    } as any)
     setName('')
     setPosition('')
     setEmail('')
@@ -55,6 +66,14 @@ export function EmployeesCard() {
 
   return (
     <ModuleCard id="employees" title="Сотрудники" size="2x2">
+      <EmployeeBoardDialog
+        open={boardOpen}
+        employees={employees}
+        onClose={() => setBoardOpen(false)}
+        onAdd={(e) => add(e as any)}
+        onRemove={(id) => remove(id)}
+        onUpdateStatus={(id, s, t) => updateStatus(id, s, t)}
+      />
       <div className="flex flex-col gap-4 h-full min-h-0">
         <div className="flex items-center justify-between">
           <div className="text-sm text-muted-foreground">
