@@ -13,7 +13,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen flex flex-col">
       <Topbar />
-      <main className="flex-1 min-h-0 w-full overflow-auto p-4 md:p-6 lg:p-8">
+      <main className="flex-1 min-h-0 w-full overflow-auto p-4 md:p-6 lg:p-8 bg-muted/20">
         <Routes>
           <Route path="/" element={token ? <MainGrid /> : <Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />

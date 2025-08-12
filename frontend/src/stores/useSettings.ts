@@ -4,6 +4,8 @@ import { persist } from 'zustand/middleware'
 interface SettingsState {
   gridRowHeight: number // px
   setGridRowHeight: (px: number) => void
+  theme: 'light' | 'dark'
+  setTheme: (t: 'light' | 'dark') => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -11,6 +13,8 @@ export const useSettings = create<SettingsState>()(
     (set, get) => ({
       gridRowHeight: 220,
       setGridRowHeight: (px) => set({ gridRowHeight: Math.max(140, Math.min(480, Math.round(px))) }),
+      theme: 'dark',
+      setTheme: (t) => set({ theme: t }),
     }),
     { name: 'ai-life-settings' }
   )

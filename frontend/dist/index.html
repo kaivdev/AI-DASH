@@ -4,8 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Life Dashboard</title>
-    <script type="module" crossorigin src="/assets/index-DXI4vY3z.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Deomot_t.css">
+    <script>
+      try {
+        var s = localStorage.getItem('ai-life-settings');
+        if (s) {
+          var theme = JSON.parse(s)?.state?.theme;
+          if (theme === 'dark') document.documentElement.classList.add('dark');
+        } else {
+          // default dark on first load
+          document.documentElement.classList.add('dark');
+        }
+      } catch {}
+    </script>
+    <script type="module" crossorigin src="/assets/index-cVOO8NRK.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DB4fkcPE.css">
   </head>
   <body>
     <div id="root"></div>

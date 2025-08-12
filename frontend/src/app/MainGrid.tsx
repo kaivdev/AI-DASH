@@ -72,6 +72,31 @@ export function MainGrid() {
     [saveGridPosition]
   )
 
+  // Auto-update stored grid positions on container size/viewport changes
+  useEffect(() => {
+    if (activeId) return // don't update while dragging
+    const grid = gridRef.current
+    if (!grid) return
+    let timer: number | null = null
+    const schedule = () => {
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        computeAndSaveGridPositions(ids)
+      }, 120)
+    }
+    const RO = (window as any).ResizeObserver
+    const ro = RO ? new RO(() => schedule()) : null
+    if (ro) ro.observe(grid)
+    const onResize = () => schedule()
+    window.addEventListener('resize', onResize)
+    schedule()
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      if (ro) ro.disconnect()
+      window.removeEventListener('resize', onResize)
+    }
+  }, [ids, activeId, computeAndSaveGridPositions])
+
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(String(event.active.id))
     contextIdsRef.current = ids
@@ -197,7 +222,7 @@ export function MainGrid() {
       <SortableContext items={renderOrder} strategy={rectSortingStrategy}>
         <div
           ref={gridRef}
-          className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] auto-rows-[var(--row-h)] gap-4 w-full h-full"
+          className="grid grid-flow-dense grid-cols-[repeat(auto-fit,minmax(320px,1fr))] auto-rows-[var(--row-h)] gap-4 w-full h-full"
           style={{ ['--row-h' as any]: `${rowH}px` }}
         >
           {renderOrder.map((key) => {

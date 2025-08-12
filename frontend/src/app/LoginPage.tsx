@@ -1,62 +1,22 @@
-import { useState } from 'react'
-import { useAuth } from '@/stores/useAuth'
-import { useNavigate, Link } from 'react-router-dom'
+import { GalleryVerticalEnd } from 'lucide-react'
+import { LoginForm } from '@/components/login-form'
 
 export function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const login = useAuth((s) => s.login)
-  const loading = useAuth((s) => s.loading)
-  const navigate = useNavigate()
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    await login(email, password)
-    navigate('/')
-  }
-
   return (
-    <div className="max-w-sm mx-auto">
-      <h1 className="text-xl font-semibold mb-4">Вход</h1>
-      <form onSubmit={onSubmit} className="space-y-3">
-        <div>
-          <label className="text-xs mb-1 block">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="h-9 px-3 rounded border bg-background w-full text-sm"
-            placeholder="you@example.com"
-            required
-          />
+    <div className="fixed inset-x-0 top-14 bottom-0 grid place-items-center p-4">
+      <div className="w-full max-w-sm flex flex-col items-center gap-4">
+        <a href="#" className="flex items-center gap-2 font-medium">
+          <div className="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md">
+            <GalleryVerticalEnd className="size-4" />
+          </div>
+          AI Life Dashboard
+        </a>
+        <div className="w-full rounded-xl border bg-card/95 backdrop-blur p-6 shadow-2xl">
+          <h2 className="text-center text-lg font-semibold mb-2">Добро пожаловать</h2>
+          <p className="text-center text-xs text-muted-foreground mb-4">Войдите в свою учётную запись</p>
+          <LoginForm />
         </div>
-        <div>
-          <label className="text-xs mb-1 block">Пароль</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="h-9 px-3 rounded border bg-background w-full text-sm"
-            placeholder="••••••••"
-            required
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="h-9 px-4 rounded border text-sm bg-primary text-primary-foreground w-full"
-        >
-          {loading ? 'Входим...' : 'Войти'}
-        </button>
-        <div className="pt-2">
-          <Link
-            to="/register"
-            className="h-9 px-4 rounded border text-sm inline-flex items-center justify-center w-full"
-          >
-            Регистрация
-          </Link>
-        </div>
-      </form>
+      </div>
     </div>
   )
 } 

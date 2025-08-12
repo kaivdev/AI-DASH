@@ -3,6 +3,7 @@ import { useEmployees } from '@/stores/useEmployees'
 import { formatCurrency } from '@/lib/format'
 import { useEffect, useState } from 'react'
 import { EmployeeBoardDialog } from './EmployeeBoardDialog'
+import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
 
 export function EmployeesCard() {
   const employees = useEmployees((s) => s.employees)
@@ -65,7 +66,19 @@ export function EmployeesCard() {
   }
 
   return (
-    <ModuleCard id="employees" title="Сотрудники" size="2x2">
+    <ModuleCard
+      id="employees"
+      title="Сотрудники"
+      size="2x2"
+      headerActions={
+        <button
+          className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
+          onClick={() => setShowAddForm(!showAddForm)}
+        >
+          {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+        </button>
+      }
+    >
       <EmployeeBoardDialog
         open={boardOpen}
         employees={employees}
@@ -75,17 +88,7 @@ export function EmployeesCard() {
         onUpdateStatus={(id, s, t) => updateStatus(id, s, t)}
       />
       <div className="flex flex-col gap-4 h-full min-h-0">
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            Всего: {employees.length}
-          </div>
-          <button 
-            className="h-8 px-3 rounded border text-sm"
-            onClick={() => setShowAddForm(!showAddForm)}
-          >
-            {showAddForm ? 'Отмена' : 'Добавить'}
-          </button>
-        </div>
+        <div className="text-sm text-muted-foreground">Всего: {employees.length}</div>
 
         {showAddForm && (
           <div className="p-3 border rounded bg-muted/10">
@@ -139,10 +142,10 @@ export function EmployeesCard() {
               </div>
             </div>
             <button 
-              className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground"
+              className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2"
               onClick={onAdd}
             >
-              Добавить сотрудника
+              <Plus className="h-4 w-4" /> Добавить сотрудника
             </button>
           </div>
         )}
@@ -160,20 +163,21 @@ export function EmployeesCard() {
                     )}
                   </div>
                   <button 
-                    className="text-xs text-red-600 hover:underline"
+                    className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
                     onClick={() => remove(emp.id)}
+                    title="Удалить" aria-label="Удалить"
                   >
-                    Удалить
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
                 
-                <div className="text-sm mb-2">
+                <div className="text_sm mb-2">
                   <div className="flex items-center gap-4">
                     {typeof emp.salary === 'number' && (
                       <span>💰 {formatCurrency(emp.salary, 'USD')}</span>
                     )}
                     {typeof emp.revenue === 'number' && (
-                      <span className="text-green-600">📈 {formatCurrency(emp.revenue, 'USD')}</span>
+                      <span className="text-green-600 dark:text-green-300">📈 {formatCurrency(emp.revenue, 'USD')}</span>
                     )}
                   </div>
                 </div>
@@ -183,7 +187,7 @@ export function EmployeesCard() {
                     <span className="text-muted-foreground">Статус:</span>
                     <span>{emp.current_status}</span>
                     {emp.status_tag && (
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-1 dark:ring-blue-500/20 rounded text-xs">
                         {emp.status_tag}
                       </span>
                     )}
@@ -213,11 +217,12 @@ export function EmployeesCard() {
                     placeholder="Тег"
                   />
                   <button 
-                    className="h-7 px-2 rounded border text-xs"
+                    className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
                     onClick={onUpdateStatus}
                     disabled={statusId !== emp.id || !newStatus.trim()}
+                    title="Обновить статус" aria-label="Обновить статус"
                   >
-                    ↑
+                    <ArrowUpRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>

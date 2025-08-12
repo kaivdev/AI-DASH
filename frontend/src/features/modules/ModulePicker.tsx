@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { registry, ModuleKey } from './registry'
 import { useModules } from '@/stores/useModules'
 import { useUI } from '@/stores/useUI'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export function ModulePicker() {
   const enabled = useModules((s) => s.enabled)
@@ -168,12 +169,7 @@ export function ModulePicker() {
                 return (
                   <label key={k} className="flex items-center justify-between rounded border px-3 py-2 hover:bg-muted/30">
                     <div className="font-medium capitalize">{k}</div>
-                    <input
-                      type="checkbox"
-                      checked={isOn}
-                      onChange={() => (isOn ? disable(k) : enable(k))}
-                      className="h-4 w-4"
-                    />
+                    <Checkbox checked={isOn} onCheckedChange={() => (isOn ? disable(k) : enable(k))} />
                   </label>
                 )
               })}

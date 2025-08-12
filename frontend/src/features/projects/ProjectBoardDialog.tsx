@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Project } from '@/types/core'
+import { Plus, X, Trash2, Pencil } from 'lucide-react'
+import { Select } from '@/components/Select'
+import { DatePicker } from '@/components/DatePicker'
 
 interface ProjectBoardDialogProps {
   open: boolean
@@ -124,10 +127,10 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
   }, [projects, statusFilter, member, query, tagFilter, startFrom, startTo])
 
   const statusColors: Record<Project['status'], string> = {
-    active: 'bg-green-100 text-green-800',
-    completed: 'bg-blue-100 text-blue-800',
-    paused: 'bg-yellow-100 text-yellow-800',
-    cancelled: 'bg-red-100 text-red-800',
+    active: 'bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20',
+    completed: 'bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-1 dark:ring-blue-500/20',
+    paused: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-200 dark:ring-1 dark:ring-yellow-500/20',
+    cancelled: 'bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-300 dark:ring-1 dark:ring-red-500/20',
   }
 
   if (!open && !show) return null
@@ -136,68 +139,52 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
     <div className="fixed inset-0 z-50">
       <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`} onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-6">
-        <div className={`w-full max-w-5xl rounded-lg border bg-background shadow-xl transition-all duration-200 ${open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+        <div className={`w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 flex flex-col ${open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
           <div className="p-5 border-b flex items-center justify-between gap-3">
             <h3 className="text-base font-semibold">Проекты</h3>
             <div className="flex items-center gap-2">
-              <button className="h-8 px-3 rounded border text-sm" onClick={() => setQuickOpen(v => !v)}>{quickOpen ? 'Скрыть' : 'Добавить'}</button>
-              <button className="h-8 px-3 rounded border text-sm" onClick={onClose}>Закрыть</button>
+              <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40" onClick={() => setQuickOpen(v => !v)}>
+                {quickOpen ? (<><X className="h-4 w-4" /> Скрыть</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+              </button>
+              <button className="h-8 w-8 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={onClose} aria-label="Закрыть">
+                <X className="h-4 w-4" />
+              </button>
             </div>
           </div>
 
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-4 overflow-auto">
             {/* Quick add */}
             {quickOpen && (
-              <div className="p-3 border rounded bg-muted/10 grid grid-cols-1 md:grid-cols-9 gap-2 items-center">
+              <div className="p-3 border rounded bg-muted/10 grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
                 <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-3" placeholder="Название проекта" value={name} onChange={(e) => setName(e.target.value)} />
-                <select className="h-9 px-3 rounded border bg-background text-sm" value={status} onChange={(e) => setStatus(e.target.value as any)}>
-                  <option value="active">active</option>
-                  <option value="completed">completed</option>
-                  <option value="paused">paused</option>
-                  <option value="cancelled">cancelled</option>
-                </select>
-                <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Теги (через запятую)" value={tagInput} onChange={(e) => setTagInput(e.target.value)} />
-                <input type="date" className="h-9 px-3 rounded border bg-background text-sm" value={newStart} onChange={(e) => setNewStart(e.target.value)} />
-                <input type="date" className="h-9 px-3 rounded border bg-background text-sm" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} />
-                <div className="md:col-span-1 flex justify-end">
-                  <button className="h-9 px-4 rounded border text-sm bg-primary text-primary-foreground" onClick={onQuickAdd}>Добавить</button>
+                <div className="md:col-span-2"><Select className="w-full" value={status} onChange={(v)=>setStatus(v as any)} options={[{value:'active',label:'active'},{value:'completed',label:'completed'},{value:'paused',label:'paused'},{value:'cancelled',label:'cancelled'}]} /></div>
+                <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-3" placeholder="Теги (через запятую)" value={tagInput} onChange={(e) => setTagInput(e.target.value)} />
+                <div className="md:col-span-2"><DatePicker value={newStart} onChange={setNewStart} /></div>
+                <div className="md:col-span-2"><DatePicker value={newEnd} onChange={setNewEnd} /></div>
+                <div className="md:col-span-2 flex justify-end">
+                  <button className="h-9 w-full px-4 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center justify-center gap-2" onClick={onQuickAdd}>
+                    <Plus className="h-4 w-4" /> Добавить
+                  </button>
                 </div>
               </div>
             )}
 
             {/* Filters */}
-            <div className="p-3 border rounded bg-muted/5 grid grid-cols-1 md:grid-cols-8 gap-2">
-              <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Поиск по названию/тегам" value={query} onChange={(e) => setQuery(e.target.value)} />
-              <select className="h-9 px-3 rounded border bg-background text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
-                <option value="all">Все статусы</option>
-                <option value="active">active</option>
-                <option value="completed">completed</option>
-                <option value="paused">paused</option>
-                <option value="cancelled">cancelled</option>
-              </select>
-              <select className="h-9 px-3 rounded border bg-background text-sm" value={member} onChange={(e) => setMember(e.target.value)}>
-                <option value="">Все участники</option>
-                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
-              <input className="h-9 px-3 rounded border bg-background text-sm" placeholder="Тег" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} />
-              <select className="h-9 px-3 rounded border bg-background text-sm" value={period} onChange={(e) => setPeriod(e.target.value as any)}>
-                <option value="all">Все даты</option>
-                <option value="today">Сегодня</option>
-                <option value="week">Эта неделя</option>
-                <option value="month">Этот месяц</option>
-                <option value="quarter">Этот квартал</option>
-                <option value="year">Этот год</option>
-                <option value="custom">Произвольный</option>
-              </select>
+            <div className="p-3 border rounded bg-muted/5 grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+              <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-3" placeholder="Поиск по названию/тегам" value={query} onChange={(e) => setQuery(e.target.value)} />
+              <div className="md:col-span-2"><Select className="w-full" value={statusFilter} onChange={(v)=>setStatusFilter(v as any)} options={[{value:'all',label:'Все статусы'},{value:'active',label:'active'},{value:'completed',label:'completed'},{value:'paused',label:'paused'},{value:'cancelled',label:'cancelled'}]} /></div>
+              <div className="md:col-span-3"><Select className="w-full" value={member} onChange={setMember} options={[{value:'',label:'Все участники'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
+              <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Тег" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} />
+              <div className="md:col-span-2"><Select className="w-full" value={period} onChange={(v)=>setPeriod(v as any)} options={[{value:'all',label:'Все даты'},{value:'today',label:'Сегодня'},{value:'week',label:'Эта неделя'},{value:'month',label:'Этот месяц'},{value:'quarter',label:'Этот квартал'},{value:'year',label:'Этот год'},{value:'custom',label:'Произвольный'}]} /></div>
               {period === 'custom' && (
                 <>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">С</span>
-                    <input type="date" className="h-9 px-3 rounded border bg-background text-sm" value={startFrom} onChange={(e) => setStartFrom(e.target.value)} />
+                    <DatePicker value={startFrom} onChange={setStartFrom} />
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">По</span>
-                    <input type="date" className="h-9 px-3 rounded border bg-background text-sm" value={startTo} onChange={(e) => setStartTo(e.target.value)} />
+                    <DatePicker value={startTo} onChange={setStartTo} />
                   </div>
                 </>
               )}
@@ -221,7 +208,7 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                         {editProjectId !== p.id && p.tags.length > 0 && (
                           <div className="mt-1 text-xs">
                             <div className="flex flex-wrap gap-1">
-                              {p.tags.map((t, i) => (<span key={i} className="px-2 py-0.5 rounded bg-muted">{t}</span>))}
+                              {p.tags.map((t, i) => (<span key={i} className="px-2 py-0.5 rounded bg-muted dark:bg-purple-500/10 dark:text-purple-200 dark:ring-1 dark:ring-purple-500/20">{t}</span>))}
                             </div>
                           </div>
                         )}
@@ -246,7 +233,7 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                             {p.links.map((l) => (
                               <div key={l.id} className="flex items-center gap-2 text-sm relative">
                                 <span>{linkTypeIcons[(l as any).link_type as 'repo' | 'docs' | 'design' | 'other']}</span>
-                                <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{l.title}</a>
+                                <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">{l.title}</a>
                               </div>
                             ))}
                           </div>
@@ -256,19 +243,14 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                           <div className="mt-2 space-y-2">
                             {p.links.map((l: any) => (
                               <div key={l.id} className="flex items-center gap-2 text-xs">
-                                <select className="h-7 px-2 rounded border bg-background" value={linkEdits[l.id]?.link_type} onChange={(e)=> setLinkEdits((m)=> ({ ...m, [l.id]: { ...(m[l.id]||{}), link_type: e.target.value as any } }))}>
-                                  <option value="repo">repo</option>
-                                  <option value="docs">docs</option>
-                                  <option value="design">design</option>
-                                  <option value="other">other</option>
-                                </select>
+                                <div className="w-[140px]"><Select value={linkEdits[l.id]?.link_type} onChange={(v)=> setLinkEdits((m)=> ({ ...m, [l.id]: { ...(m[l.id]||{}), link_type: v as any } }))} options={[{value:'repo',label:'repo'},{value:'docs',label:'docs'},{value:'design',label:'design'},{value:'other',label:'other'}]} /></div>
                                 <input className="h-7 px-2 rounded border bg-background flex-1" value={linkEdits[l.id]?.title || ''} onChange={(e)=> setLinkEdits((m)=> ({ ...m, [l.id]: { ...(m[l.id]||{}), title: e.target.value } }))} placeholder="Название" />
                                 <input className="h-7 px-2 rounded border bg-background flex-1" value={linkEdits[l.id]?.url || ''} onChange={(e)=> setLinkEdits((m)=> ({ ...m, [l.id]: { ...(m[l.id]||{}), url: e.target.value } }))} placeholder="https://..." />
-                                <button className="h-7 px-2 rounded border" onClick={()=> { onUpdateLink && onUpdateLink(p.id, l.id, linkEdits[l.id] as any) }}>Сохранить</button>
-                                {onRemoveLink && (<button className="h-7 px-2 rounded border text-red-600" onClick={()=> onRemoveLink(p.id, l.id)}>Удалить</button>)}
+                                <button className="h-7 px-2 rounded border hover:bg-muted/40" onClick={()=> { onUpdateLink && onUpdateLink(p.id, l.id, linkEdits[l.id] as any) }}>Сохранить</button>
+                                {onRemoveLink && (<button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={()=> onRemoveLink(p.id, l.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>)}
                               </div>
                             ))}
-                            <div className="flex justify-end"><button className="h-7 px-2 rounded border text-xs" onClick={()=> { setEditLinksProjectId(''); setLinkEdits({}) }}>Готово</button></div>
+                            <div className="flex justify-end"><button className="h-7 px-2 rounded border text-xs hover:bg-muted/40" onClick={()=> { setEditLinksProjectId(''); setLinkEdits({}) }}>Готово</button></div>
                           </div>
                         )}
                       </div>
@@ -282,10 +264,10 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                               const emp = employees.find(e => e.id === id)
                               if (!emp) return null
                               return (
-                                <div key={id} className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded text-xs">
+                                <div key={id} className="flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-500/10 dark:text-blue-200 dark:ring-1 dark:ring-blue-500/20 rounded text-xs">
                                   <span>{emp.name}</span>
                                   {onRemoveMember && (
-                                    <button className="text-red-600 hover:text-red-800" onClick={() => onRemoveMember(p.id, id)}>×</button>
+                                    <button className="text-red-600 dark:text-red-300 hover:text-red-800" onClick={() => onRemoveMember(p.id, id)}>×</button>
                                   )}
                                 </div>
                               )
@@ -296,22 +278,16 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
 
                       {/* Controls row: add member and link */}
                       <div className="mt-2 flex items-center gap-2 text-xs">
-                        <select
-                          className="h-7 px-2 rounded border bg-background text-xs"
-                          onChange={(e) => {
-                            if (e.target.value && onAddMember) onAddMember(p.id, e.target.value)
-                            e.currentTarget.value = ''
-                          }}
-                        >
-                          <option value="">+ сотрудник</option>
-                          {employees
-                            .filter(emp => !((p as any).memberIds ?? (p as any).member_ids ?? []).includes(emp.id))
-                            .map(emp => (
-                              <option key={emp.id} value={emp.id}>{emp.name}</option>
-                            ))
-                          }
-                        </select>
-                        <button className="h-7 px-2 rounded border text-xs" onClick={() => setSelectedProjectId(p.id)}>+ ссылка</button>
+                        <div className="w-[200px]">
+                          <Select
+                            value=""
+                            onChange={(v) => { if (v && onAddMember) onAddMember(p.id, v) }}
+                            options={[{value:'',label:'+ сотрудник'},...employees
+                              .filter(emp => !((p as any).memberIds ?? (p as any).member_ids ?? []).includes(emp.id))
+                              .map(emp => ({value:emp.id,label:emp.name}))]}
+                          />
+                        </div>
+                        <button className="h-7 px-2 rounded border text-xs hover:bg-muted/40" onClick={() => setSelectedProjectId(p.id)}>+ ссылка</button>
                       </div>
 
                       {/* Add link form shown like small card */}
@@ -319,16 +295,11 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                         <div className="mt-2 p-2 border rounded bg-muted/10">
                           <div className="grid grid-cols-2 gap-2 mb-2">
                             <input className="h-7 px-2 rounded border bg-background text-xs" placeholder="Название ссылки" value={linkTitle} onChange={(e) => setLinkTitle(e.target.value)} />
-                            <select className="h-7 px-2 rounded border bg-background text-xs" value={linkType} onChange={(e) => setLinkType(e.target.value as any)}>
-                              <option value="repo">Репозиторий</option>
-                              <option value="docs">Документация</option>
-                              <option value="design">Дизайн</option>
-                              <option value="other">Другое</option>
-                            </select>
+                            <Select value={linkType} onChange={(v)=>setLinkType(v as any)} options={[{value:'repo',label:'Репозиторий'},{value:'docs',label:'Документация'},{value:'design',label:'Дизайн'},{value:'other',label:'Другое'}]} />
                           </div>
                           <div className="flex gap-2">
                             <input className="h-7 px-2 rounded border bg-background text-xs flex-1" placeholder="https://..." value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
-                            <button className="h-7 px-2 rounded border text-xs" onClick={() => { if (onAddLink && linkTitle.trim() && linkUrl.trim()) { onAddLink(p.id, { title: linkTitle.trim(), url: linkUrl.trim(), link_type: linkType }); setLinkTitle(''); setLinkUrl(''); setSelectedProjectId('') } }}>Добавить</button>
+                            <button className="h-7 px-2 rounded border text-xs hover:bg-muted/40" onClick={() => { if (onAddLink && linkTitle.trim() && linkUrl.trim()) { onAddLink(p.id, { title: linkTitle.trim(), url: linkUrl.trim(), link_type: linkType }); setLinkTitle(''); setLinkUrl(''); setSelectedProjectId('') } }}>Добавить</button>
                           </div>
                         </div>
                       )}
@@ -337,29 +308,24 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                       {editProjectId === p.id && (
                         <div className="mt-2 flex items-center gap-2 text-xs">
                           <span className="text-muted-foreground">Статус:</span>
-                          <select
-                            className="h-7 px-2 rounded border bg-background text-xs"
-                            value={p.status}
-                            onChange={(e) => onUpdateStatus && onUpdateStatus(p.id, e.target.value as Project['status'])}
-                          >
-                            <option value="active">active</option>
-                            <option value="completed">completed</option>
-                            <option value="paused">paused</option>
-                            <option value="cancelled">cancelled</option>
-                          </select>
+                          <div className="w-[140px]"><Select value={p.status} onChange={(v)=> onUpdateStatus && onUpdateStatus(p.id, v as Project['status'])} options={[{value:'active',label:'active'},{value:'completed',label:'completed'},{value:'paused',label:'paused'},{value:'cancelled',label:'cancelled'}]} /></div>
                         </div>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
                       {editProjectId === p.id ? (
                         <>
-                          <button className="text-xs" onClick={()=> { const tagsArr = (editTagsInput || '').split(',').map(t=>t.trim()).filter(Boolean); onUpdateProject && onUpdateProject(p.id, { name: editName.trim() || p.name, description: editDescription, tags: tagsArr } as any); setEditProjectId('') }}>Сохранить</button>
-                          <button className="text-xs" onClick={()=> { setEditProjectId(''); setEditName(''); setEditDescription(''); setEditTagsInput('') }}>Отмена</button>
+                          <button className="text-xs hover:underline" onClick={()=> { const tagsArr = (editTagsInput || '').split(',').map(t=>t.trim()).filter(Boolean); onUpdateProject && onUpdateProject(p.id, { name: editName.trim() || p.name, description: editDescription, tags: tagsArr } as any); setEditProjectId('') }}>Сохранить</button>
+                          <button className="text-xs hover:underline" onClick={()=> { setEditProjectId(''); setEditName(''); setEditDescription(''); setEditTagsInput('') }}>Отмена</button>
                         </>
                       ) : (
                         <>
-                          <button className="text-xs text-blue-600" onClick={()=> { setEditProjectId(p.id); setEditName(p.name); setEditDescription(p.description || ''); setEditTagsInput((p.tags || []).join(', ')) }}>Ред.</button>
-                          <button className="text-xs text-red-600" onClick={() => onRemove(p.id)}>Удалить</button>
+                          <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={()=> { setEditProjectId(p.id); setEditName(p.name); setEditDescription(p.description || ''); setEditTagsInput((p.tags || []).join(', ')) }} title="Редактировать" aria-label="Редактировать">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => onRemove(p.id)} title="Удалить" aria-label="Удалить">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </>
                       )}
                     </div>

@@ -1,6 +1,8 @@
 import { ModuleCard } from '@/features/modules/ModuleCard'
 import { useGoals } from '@/stores/useGoals'
 import { useState } from 'react'
+import { Plus, X, Trash2, PlusCircle, MinusCircle } from 'lucide-react'
+import { Select } from '@/components/Select'
 
 export function GoalsCard() {
   const goals = useGoals((s) => s.goals)
@@ -37,12 +39,12 @@ export function GoalsCard() {
       title: title.trim(),
       description: description.trim(),
       period,
-      startDate: startDate.toISOString().slice(0, 10),
-      endDate: endDate.toISOString().slice(0, 10),
+      start_date: startDate.toISOString().slice(0, 10),
+      end_date: endDate.toISOString().slice(0, 10),
       status: 'active',
       progress: 0,
       tags: tags.trim().split(',').map(t => t.trim()).filter(Boolean)
-    })
+    } as any)
     setTitle('')
     setDescription('')
     setTags('')
@@ -50,9 +52,9 @@ export function GoalsCard() {
   }
 
   const statusColors = {
-    active: 'bg-green-100 text-green-800',
-    completed: 'bg-blue-100 text-blue-800',
-    paused: 'bg-yellow-100 text-yellow-800'
+    active: 'bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20',
+    completed: 'bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-1 dark:ring-blue-500/20',
+    paused: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-200 dark:ring-1 dark:ring-yellow-500/20'
   }
 
   const periodLabels = {
@@ -62,19 +64,21 @@ export function GoalsCard() {
   }
 
   return (
-    <ModuleCard id="goals" title="Цели" size="2x2">
+    <ModuleCard
+      id="goals"
+      title="Цели"
+      size="2x2"
+      headerActions={
+        <button
+          className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
+          onClick={() => setShowAddForm(!showAddForm)}
+        >
+          {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+        </button>
+      }
+    >
       <div className="flex flex-col gap-4 h-full min-h-0">
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            Активных: {goals.filter(g => g.status === 'active').length}
-          </div>
-          <button 
-            className="h-8 px-3 rounded border text-sm"
-            onClick={() => setShowAddForm(!showAddForm)}
-          >
-            {showAddForm ? 'Отмена' : 'Добавить'}
-          </button>
-        </div>
+        <div className="text-sm text-muted-foreground">Активных: {goals.filter(g => g.status === 'active').length}</div>
 
         {showAddForm && (
           <div className="p-3 border rounded bg-muted/10">
@@ -101,32 +105,24 @@ export function GoalsCard() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs mb-1 block">Период</label>
-                  <select
-                    value={period}
-                    onChange={(e) => setPeriod(e.target.value as any)}
-                    className="h-8 px-3 rounded border bg-background w-full text-sm"
-                  >
-                    <option value="monthly">Месячная</option>
-                    <option value="quarterly">Квартальная</option>
-                    <option value="yearly">Годовая</option>
-                  </select>
+                  <Select value={period} onChange={(v)=>setPeriod(v as any)} options={[{value:'monthly',label:'Месячная'},{value:'quarterly',label:'Квартальная'},{value:'yearly',label:'Годовая'}]} />
                 </div>
                 <div>
                   <label className="text-xs mb-1 block">Теги (через запятую)</label>
                   <input 
                     value={tags} 
                     onChange={(e) => setTags(e.target.value)}
-                    className="h-8 px-3 rounded border bg-background w-full text-sm"
+                    className="h-8 px-3 rounded border bg-background w-full text см"
                     placeholder="business, growth"
                   />
                 </div>
               </div>
             </div>
             <button 
-              className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground mt-3"
+              className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground mt-3 inline-flex items-center gap-2"
               onClick={onAdd}
             >
-              Создать цель
+              <Plus className="h-4 w-4" /> Создать цель
             </button>
           </div>
         )}
@@ -149,14 +145,15 @@ export function GoalsCard() {
                       </div>
                     )}
                     <div className="text-xs text-muted-foreground mb-2">
-                      {goal.startDate} — {goal.endDate}
+                      {goal.start_date} — {goal.end_date}
                     </div>
                   </div>
                   <button 
-                    className="text-xs text-red-600 hover:underline"
+                    className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
                     onClick={() => remove(goal.id)}
+                    title="Удалить" aria-label="Удалить"
                   >
-                    Удалить
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
 
@@ -165,9 +162,9 @@ export function GoalsCard() {
                     <span className="text-sm">Прогресс</span>
                     <span className="text-sm font-medium">{goal.progress}%</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="w-full rounded-full h-2 bg-gray-200 dark:bg-gray-700/60">
                     <div 
-                      className="bg-blue-600 h-2 rounded-full transition-all"
+                      className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.35)]"
                       style={{ width: `${goal.progress}%` }}
                     ></div>
                   </div>
@@ -176,7 +173,7 @@ export function GoalsCard() {
                 {goal.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mb-3">
                     {goal.tags.map((tag, i) => (
-                      <span key={i} className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs">
+                      <span key={i} className="px-2 py-1 bg-gray-100 text-gray-700 dark:bg-purple-500/10 dark:text-purple-200 dark:ring-1 dark:ring-purple-500/20 rounded text-xs">
                         {tag}
                       </span>
                     ))}
@@ -208,16 +205,18 @@ export function GoalsCard() {
                     }}
                   />
                   <button 
-                    className="h-7 px-2 rounded border text-xs"
+                    className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
                     onClick={() => updateProgress(goal.id, Math.min(100, goal.progress + 10))}
+                    title="+10%" aria-label="+10%"
                   >
-                    +10%
+                    <PlusCircle className="h-3.5 w-3.5" />
                   </button>
                   <button 
-                    className="h-7 px-2 rounded border text-xs"
+                    className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
                     onClick={() => updateProgress(goal.id, Math.max(0, goal.progress - 10))}
+                    title="-10%" aria-label="-10%"
                   >
-                    -10%
+                    <MinusCircle className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
