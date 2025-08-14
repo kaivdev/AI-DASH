@@ -7,7 +7,7 @@ interface EmployeesState {
   employees: Employee[]
   loading: boolean
   error: string | null
-  fetchEmployees: () => Promise<void>
+  fetchEmployees: (force?: boolean) => Promise<void>
   add: (employee: Omit<Employee, 'id' | 'created_at' | 'updated_at'>) => Promise<void>
   update: (id: string, patch: Partial<Omit<Employee, 'id' | 'created_at' | 'updated_at'>>) => Promise<void>
   remove: (id: string) => Promise<void>
@@ -54,16 +54,15 @@ export const useEmployees = create<EmployeesState>()(
       loading: false,
       error: null,
       
-      fetchEmployees: async () => {
-        // Загружаем с сервера только если локально пусто
-        if (get().employees && get().employees.length > 0) return
+      fetchEmployees: async (force = false) => {
+        // Загружаем с сервера только если локально пусто, либо если принудительно
+        if (!force && get().employees && get().employees.length > 0) return
         set({ loading: true, error: null })
         try {
           const employees = await employeeApi.getAll() as Employee[]
           if (Array.isArray(employees) && employees.length > 0) {
             set({ employees, loading: false })
           } else {
-            // Если сервер вернул пусто — оставляем локальные данные
             set({ loading: false })
           }
         } catch (error) {

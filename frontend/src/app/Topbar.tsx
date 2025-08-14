@@ -155,22 +155,57 @@ function AIChatModal({ onClose, initialQuery = '' }: { onClose: () => void; init
   const [loading, setLoading] = useState(false)
   const [history, setHistory] = useState<Msg[]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const endRef = useRef<HTMLDivElement | null>(null)
   const fetchTasks = useTasks((s) => s.fetchTasks)
+  const userId = useAuth((s) => s.user?.id)
+  const historyKey = `ai-chat-history:${userId || 'anon'}`
+  const [hydrated, setHydrated] = useState(false)
 
   const suggestions = [
     'Добавь задачу: Создать презентацию, исполнитель Никита, срок завтра, приоритет высокий',
     'Подведи итоги задач за сегодня',
     'Создай проект: Рефакторинг фронтенда',
+    'Добавь сотрудника: Иван Петров, позиция Backend Developer, ставка 1500',
+    'Добавь транзакцию: доход 250000 за январь, проект Dashboard Platform',
+    'Добавь заметку: Идеи по оптимизации UI',
+    'Добавь чтение: статья “Производительность React”, приоритет высокий',
+    'Добавь цель: Запустить новый сайт, период quarterly',
   ]
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // lock body scroll
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { 
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
   }, [onClose])
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+    // restore persisted history
+    try {
+      const rawStr = localStorage.getItem(historyKey)
+      if (rawStr) {
+        const arr = JSON.parse(rawStr)
+        if (Array.isArray(arr) && history.length === 0) setHistory(arr as Msg[])
+      }
+    } catch {}
+    setHydrated(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyKey])
+
+  useEffect(() => {
+    // persist history (cap last 200 msgs)
+    if (!hydrated) return
+    try { localStorage.setItem(historyKey, JSON.stringify(history.slice(-200))) } catch {}
+  }, [history, hydrated, historyKey])
+
+  useEffect(() => {
+    // auto-scroll to bottom
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [history, loading])
 
   useEffect(() => {
@@ -209,17 +244,78 @@ function AIChatModal({ onClose, initialQuery = '' }: { onClose: () => void; init
     setQuery('')
     setLoading(true)
     try {
-      const res = await fetch('http://localhost:8000/api/ai/command', {
+      // 1) Сначала пробуем командный режим
+      const cmdRes = await fetch('http://localhost:8000/api/ai/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: message }),
+        body: JSON.stringify({ query: message, user_id: userId || undefined }),
       })
-      const data = await res.json()
-      const summary = data?.result?.summary || 'Готово'
+      const cmd = await cmdRes.json()
+      const summary = cmd?.result?.summary?.toString()?.trim()
+      const actions = Array.isArray(cmd?.result?.actions) ? cmd.result.actions : []
+      const created = Array.isArray(cmd?.result?.created_task_ids) ? cmd.result.created_task_ids : []
+      const preferCmd = !!summary && (actions.length > 0 || created.length > 0)
+      const domainRe = /(задач|проект|сотрудн|финанс|транзакц|заметк|чтени|goal|цель|ставк|почасов|доход|расход|прибыл|выручк)/i
+      const badSummaryRe = /(не найден|ошибк|недоступ|не могу)/i
+
+      let reply = ''
+      if (preferCmd || (summary && summary.length > 0 && domainRe.test(message) && !badSummaryRe.test(summary))) {
+        reply = summary as string
+      } else {
+        // 2) Фолбэк: свободный чат
+        const chatRes = await fetch('http://localhost:8000/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: message, user_id: userId || undefined }),
+        })
+        const chat = await chatRes.json()
+        const chatText = chat?.message?.toString()?.trim()
+        reply = chatText || summary || 'Готово'
+      }
+
       const ts = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-      setHistory((h) => [...h, { role: 'assistant', content: summary, ts }])
-      // refresh tasks if backend created/updated tasks (safe to force)
+      setHistory((h) => [...h, { role: 'assistant', content: reply, ts }])
+
+      // Рефреш данных после возможных действий
       await fetchTasks(true)
+      if (/финанс|доход|расход|баланс|transaction/i.test(message)) {
+        try { (await import('@/stores/useFinance')).useFinance.getState().fetch() } catch {}
+      }
+      if (/сотрудник|employee|штат|ставк|позици/i.test(message)) {
+        try { (await import('@/stores/useEmployees')).useEmployees.getState().fetchEmployees(true) } catch {}
+      }
+      if (/проект|project/i.test(message)) {
+        try {
+          const { projectApi } = await import('@/lib/api')
+          const { useProjects } = await import('@/stores/useProjects')
+          const items = await projectApi.getAll() as any
+          if (Array.isArray(items)) (useProjects as any).setState({ projects: items })
+        } catch {}
+      }
+      if (/заметк|note/i.test(message)) {
+        try {
+          const { noteApi } = await import('@/lib/api')
+          const { useNotes } = await import('@/stores/useNotes')
+          const items = await noteApi.getAll() as any
+          if (Array.isArray(items)) (useNotes as any).setState({ notes: items })
+        } catch {}
+      }
+      if (/чтени|reading|книг|стат|видео/i.test(message)) {
+        try {
+          const { readingApi } = await import('@/lib/api')
+          const { useReadingList } = await import('@/stores/useReadingList')
+          const items = await readingApi.getAll() as any
+          if (Array.isArray(items)) (useReadingList as any).setState({ items })
+        } catch {}
+      }
+      if (/цель|goal/i.test(message)) {
+        try {
+          const { goalApi } = await import('@/lib/api')
+          const { useGoals } = await import('@/stores/useGoals')
+          const items = await goalApi.getAll() as any
+          if (Array.isArray(items)) (useGoals as any).setState({ goals: items })
+        } catch {}
+      }
     } catch (e: any) {
       const ts = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
       setHistory((h) => [...h, { role: 'assistant', content: 'Ошибка запроса к ИИ', ts }])
@@ -230,7 +326,7 @@ function AIChatModal({ onClose, initialQuery = '' }: { onClose: () => void; init
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm supports-[backdrop-filter]:backdrop-blur-md" onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-4">
         <div className="relative w-full max-w-5xl rounded-2xl border bg-background shadow-2xl overflow-hidden">
           <button
@@ -245,7 +341,7 @@ function AIChatModal({ onClose, initialQuery = '' }: { onClose: () => void; init
               <div className="font-semibold">Чат с ИИ</div>
             </div>
           </div>
-          <ScrollArea className="max-h-[75vh]">
+          <div className="h-[70vh] overflow-y-auto">
             <div ref={scrollRef} className="p-4 space-y-3">
               {history.map((m, i) => (
                 <div key={i} className={`flex items-end gap-2 ${m.role === 'user' ? 'justify-end' : ''}`}>
@@ -265,10 +361,11 @@ function AIChatModal({ onClose, initialQuery = '' }: { onClose: () => void; init
                   </div>
                 </div>
               )}
+              <div ref={endRef} />
             </div>
-          </ScrollArea>
+          </div>
           <div className="px-4 pb-2 flex flex-wrap gap-2">
-            {['Добавь задачу: Создать презентацию, исполнитель Никита, срок завтра, приоритет высокий','Подведи итоги задач за сегодня','Создай проект: Рефакторинг фронтенда'].map((s, idx) => (
+            {["Добавь задачу: Создать презентацию, исполнитель Никита, срок завтра, приоритет высокий","Подведи итоги задач за сегодня","Создай проект: Рефакторинг фронтенда","Добавь сотрудника: Иван Петров, позиция Backend Developer, ставка 1500","Добавь транзакцию: доход 250000 за январь, проект Dashboard Platform","Добавь заметку: Идеи по оптимизации UI","Добавь чтение: статья “Производительность React”, приоритет высокий","Добавь цель: Запустить новый сайт, период quarterly"].map((s, idx) => (
               <button key={idx} className="text-xs px-2 py-1 rounded-full border hover:bg-muted/40" onClick={()=> send(s)}>{s}</button>
             ))}
           </div>

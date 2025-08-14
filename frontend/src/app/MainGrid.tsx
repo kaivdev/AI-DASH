@@ -5,12 +5,13 @@ import { useSettings } from '@/stores/useSettings'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DndContext,
-  closestCenter,
+  rectIntersection,
+  pointerWithin,
+  type CollisionDetection,
   DragEndEvent,
   DragStartEvent,
   DragOverEvent,
   DragCancelEvent,
-  DragMoveEvent,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -37,23 +38,11 @@ export function MainGrid() {
   const ids = useMemo<ModuleKey[]>(() => items.map((m) => m.key), [items])
 
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [contextIds, _setContextIds] = useState<ModuleKey[]>(ids)
-  const contextIdsRef = useRef<ModuleKey[]>(ids)
+  const [activeRect, setActiveRect] = useState<{ width: number; height: number } | null>(null)
   const lastOverIdRef = useRef<ModuleKey | null>(null)
 
-  const setContextIds = useCallback((next: ModuleKey[] | ((prev: ModuleKey[]) => ModuleKey[])) => {
-    _setContextIds((prev) => {
-      const value = typeof next === 'function' ? (next as any)(prev) : next
-      contextIdsRef.current = value
-      return value
-    })
-  }, [])
-
   useEffect(() => {
-    if (!activeId) {
-      contextIdsRef.current = ids
-      _setContextIds(ids)
-    }
+    // No-op effect now; we don't maintain a separate preview order during drag
   }, [ids, activeId])
 
   const computeAndSaveGridPositions = useCallback(
@@ -99,22 +88,14 @@ export function MainGrid() {
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(String(event.active.id))
-    contextIdsRef.current = ids
-    _setContextIds(ids)
+    const rect = event.active.rect.current?.initial
+    if (rect) {
+      setActiveRect({ width: rect.width, height: rect.height })
+    } else {
+      setActiveRect(null)
+    }
     lastOverIdRef.current = String(event.active.id) as ModuleKey
-  }, [ids])
-
-  const reorderPreview = useCallback((activeKey: ModuleKey, overKey: ModuleKey) => {
-    setContextIds((prev) => {
-      const oldIndex = prev.indexOf(activeKey)
-      const newIndex = prev.indexOf(overKey)
-      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-        return arrayMove(prev, oldIndex, newIndex)
-      }
-      return prev
-    })
-    lastOverIdRef.current = overKey
-  }, [setContextIds])
+  }, [])
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
@@ -123,49 +104,38 @@ export function MainGrid() {
       const activeKey = String(active.id) as ModuleKey
       const overKey = String(over.id) as ModuleKey
       if (activeKey === overKey) return
-      reorderPreview(activeKey, overKey)
+      lastOverIdRef.current = overKey
     },
-    [reorderPreview]
-  )
-
-  const handleDragMove = useCallback(
-    (event: DragMoveEvent) => {
-      const { active, over } = event
-      if (!over) return
-      const activeKey = String(active.id) as ModuleKey
-      const overKey = String(over.id) as ModuleKey
-      if (activeKey === overKey) return
-      reorderPreview(activeKey, overKey)
-    },
-    [reorderPreview]
+    []
   )
 
   const handleDragCancel = useCallback((_: DragCancelEvent) => {
     setActiveId(null)
-    contextIdsRef.current = ids
-    _setContextIds(ids)
+    setActiveRect(null)
     lastOverIdRef.current = null
-  }, [ids])
+  }, [])
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event
       const activeKey = String(active.id) as ModuleKey
-      const overKeyFallback = over ? (String(over.id) as ModuleKey) : lastOverIdRef.current
+      const overKey = over ? (String(over.id) as ModuleKey) : lastOverIdRef.current
       setActiveId(null)
+      setActiveRect(null)
 
-      const previewOrder = contextIdsRef.current
-      const isChanged = previewOrder.length === ids.length && previewOrder.some((k, i) => k !== ids[i])
-
-      if (!isChanged) {
-        contextIdsRef.current = ids
-        _setContextIds(ids)
+      if (!overKey) {
         lastOverIdRef.current = null
         return
       }
 
-      // Commit the preview order regardless of over equality
-      const finalOrder = previewOrder
+      const oldIndex = ids.indexOf(activeKey)
+      const newIndex = ids.indexOf(overKey)
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) {
+        lastOverIdRef.current = null
+        return
+      }
+
+      const finalOrder = arrayMove(ids, oldIndex, newIndex)
       const newOrderItems: EnabledModule[] = finalOrder.map((k, idx) => {
         const m = items.find((x) => x.key === k)!
         return { ...m, order: idx }
@@ -173,8 +143,6 @@ export function MainGrid() {
 
       setOrder(newOrderItems)
       computeAndSaveGridPositions(finalOrder)
-      contextIdsRef.current = finalOrder
-      _setContextIds(finalOrder)
       lastOverIdRef.current = null
     },
     [ids, items, setOrder, computeAndSaveGridPositions]
@@ -182,14 +150,14 @@ export function MainGrid() {
 
   const activeModule = useMemo(() => items.find((i) => i.key === (activeId as ModuleKey)), [activeId, items])
 
-  const renderOrder = activeId ? contextIds : ids
   const itemByKey = useMemo(() => {
     const map = new Map<ModuleKey, EnabledModule>()
     for (const it of items) map.set(it.key, it)
     return map
   }, [items])
 
-  const overlaySize = useMemo(() => {
+  const computedOverlaySize = useMemo(() => {
+    if (activeRect) return activeRect
     if (!activeModule) return { width: 320, height: rowH }
     const grid = gridRef.current
     let columnGap = 16
@@ -207,25 +175,40 @@ export function MainGrid() {
     const computedRowSpan = activeModule.rowSpan ?? (activeModule.size === '2x2' || activeModule.size === '3x2' ? 2 : 1)
     const height = computedRowSpan * rowH + (computedRowSpan - 1) * columnGap
     return { width, height }
-  }, [activeModule, rowH])
+  }, [activeRect, activeModule, rowH])
+
+  // Stable collision detection preferring last target when still valid
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    let collisions = pointerWithin(args)
+    if (collisions.length === 0) {
+      collisions = rectIntersection(args)
+    }
+    if (collisions.length > 1 && lastOverIdRef.current) {
+      const idx = collisions.findIndex((c) => c.id === lastOverIdRef.current)
+      if (idx !== -1) {
+        const chosen = collisions[idx]
+        return [chosen]
+      }
+    }
+    return collisions
+  }, [])
 
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
-      onDragMove={handleDragMove}
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
     >
-      <SortableContext items={renderOrder} strategy={rectSortingStrategy}>
+      <SortableContext items={ids} strategy={rectSortingStrategy}>
         <div
           ref={gridRef}
-          className="grid grid-flow-dense grid-cols-[repeat(auto-fit,minmax(320px,1fr))] auto-rows-[var(--row-h)] gap-4 w-full h-full"
+          className="grid grid-flow-row grid-cols-[repeat(auto-fit,minmax(320px,1fr))] auto-rows-[var(--row-h)] gap-4 w-full h-full"
           style={{ ['--row-h' as any]: `${rowH}px` }}
         >
-          {renderOrder.map((key) => {
+          {ids.map((key) => {
             const m = itemByKey.get(key)
             if (!m) return null
             const Mod = registry[m.key]
@@ -253,11 +236,11 @@ export function MainGrid() {
         </div>
       </SortableContext>
 
-      <DragOverlay dropAnimation={{ duration: 180, easing: 'ease-out' }}>
+      <DragOverlay dropAnimation={{ duration: 180, easing: 'ease-out' }} adjustScale={false}>
         {activeModule ? (
           <div
             className="opacity-95 pointer-events-none"
-            style={{ width: overlaySize.width, height: overlaySize.height }}
+            style={{ width: computedOverlaySize.width, height: computedOverlaySize.height }}
           >
             {(() => {
               const Mod = registry[activeModule.key]
