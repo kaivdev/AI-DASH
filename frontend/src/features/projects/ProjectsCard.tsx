@@ -1,17 +1,35 @@
 import { ModuleCard } from '@/features/modules/ModuleCard'
 import { useProjects } from '@/stores/useProjects'
 import { useEmployees } from '@/stores/useEmployees'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { ProjectBoardDialog } from './ProjectBoardDialog'
 import { Pencil, Trash2, Plus, X } from 'lucide-react'
 import { Select } from '@/components/Select'
-import { DatePicker } from '@/components/DatePicker'
+import { DatePicker } from '@/components/ui/date-picker'
+import { ProjectDetailDrawer } from './ProjectDetailDrawer'
+import { useTasks } from '@/stores/useTasks'
+import { formatCurrency } from '@/lib/format'
 
 export function ProjectsCard() {
   const projects = useProjects((s) => s.projects)
+  const sortedProjects = projects.slice().sort((a,b)=> (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0))
   const employees = useEmployees((s) => s.employees)
   const add = useProjects((s) => s.add)
   const addLink = useProjects((s) => s.addLink)
+  const tasks = useTasks((s) => s.tasks)
+  const taskCounts = useMemo(() => {
+    const m = new Map<string, { total: number; open: number; done: number }>()
+    for (const t of tasks) {
+      const pid = (t as any).project_id as string | undefined
+      if (!pid) continue
+      const row = m.get(pid) || { total: 0, open: 0, done: 0 }
+      row.total += 1
+      if (t.done) row.done += 1
+      else row.open += 1
+      m.set(pid, row)
+    }
+    return m
+  }, [tasks])
   const updateLink = useProjects((s) => s.updateLink)
   const removeLink = useProjects((s) => s.removeLink)
   const addMember = useProjects((s) => s.addMember)
@@ -41,6 +59,9 @@ export function ProjectsCard() {
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editTagsInput, setEditTagsInput] = useState('')
+
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailProjectId, setDetailProjectId] = useState<string | null>(null)
 
   useEffect(() => {
     function onTitleClick(e: any) {
@@ -136,6 +157,8 @@ export function ProjectsCard() {
     }
   }
 
+  const detailProject = detailProjectId ? projects.find(p => p.id === detailProjectId) || null : null
+
   return (
     <ModuleCard
       id="projects"
@@ -150,21 +173,37 @@ export function ProjectsCard() {
         </button>
       }
     >
-      <ProjectBoardDialog
-        open={boardOpen}
-        projects={projects as any}
+             <ProjectBoardDialog
+         open={boardOpen}
+         projects={projects as any}
+         employees={employees}
+         onClose={() => setBoardOpen(false)}
+         onAdd={(p) => add(p as any)}
+         onRemove={(id) => remove(id)}
+         onAddMember={(pid, eid) => addMember(pid, eid)}
+         onRemoveMember={(pid, eid) => removeMember(pid, eid)}
+         onAddLink={(pid, link) => addLink(pid, link as any)}
+         onRemoveLink={(pid, lid) => removeLink(pid, lid)}
+         onUpdateStatus={(pid, st) => useProjects.getState().update(pid, { status: st } as any)}
+         onUpdateProject={(pid, patch) => useProjects.getState().update(pid, patch as any)}
+         onUpdateLink={(pid, lid, patch) => useProjects.getState().updateLink(pid, lid, patch as any)}
+         initialProjectId={selectedProject || ''}
+       />
+
+      <ProjectDetailDrawer
+        open={detailOpen}
+        project={detailProject as any}
         employees={employees}
-        onClose={() => setBoardOpen(false)}
-        onAdd={(p) => add(p as any)}
-        onRemove={(id) => remove(id)}
-        onAddMember={(pid, eid) => addMember(pid, eid)}
-        onRemoveMember={(pid, eid) => removeMember(pid, eid)}
-        onAddLink={(pid, link) => addLink(pid, link as any)}
-        onRemoveLink={(pid, lid) => removeLink(pid, lid)}
-        onUpdateStatus={(pid, st) => useProjects.getState().update(pid, { status: st } as any)}
-        onUpdateProject={(pid, patch) => useProjects.getState().update(pid, patch as any)}
-        onUpdateLink={(pid, lid, patch) => useProjects.getState().updateLink(pid, lid, patch as any)}
+        onClose={() => setDetailOpen(false)}
+        onEdit={async (id, patch) => { try { await updateProject(id, patch as any) } catch {} }}
+        onRemove={async (id) => { try { await remove(id) } catch {} setDetailOpen(false) }}
+        onAddMember={async (pid, eid) => { try { await addMember(pid, eid) } catch {} }}
+        onRemoveMember={async (pid, eid) => { try { await removeMember(pid, eid) } catch {} }}
+        onAddLink={async (pid, link) => { try { await addLink(pid, link as any) } catch {} }}
+        onRemoveLink={async (pid, lid) => { try { await removeLink(pid, lid) } catch {} }}
+        onSetMemberRate={async (pid, eid, rate) => { try { await (await import('@/lib/api')).projectApi.setMemberRate(pid, eid, rate === null ? null : Number(rate)); const current = useProjects.getState().projects.find(p=>p.id===pid) as any; const nextRates = { ...(current?.member_rates||{}), [eid]: rate ?? null }; useProjects.getState().update(pid, { member_rates: nextRates } as any) } catch {} }}
       />
+
       <div className="flex flex-col gap-4 h-full min-h-0">
         <div className="text-sm text-muted-foreground">Всего: {projects.length}</div>
 
@@ -202,11 +241,21 @@ export function ProjectsCard() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs mb-1 block">Начало</label>
-                  <DatePicker value={startDate} onChange={setStartDate} className="h-8" />
+                  <DatePicker 
+                    date={startDate ? new Date(startDate) : undefined} 
+                    onDateChange={(newDate) => setStartDate(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    className="h-8 w-full" 
+                    placeholder="Начало"
+                  />
                 </div>
                 <div>
                   <label className="text-xs mb-1 block">Окончание</label>
-                  <DatePicker value={endDate} onChange={setEndDate} className="h-8" />
+                  <DatePicker 
+                    date={endDate ? new Date(endDate) : undefined} 
+                    onDateChange={(newDate) => setEndDate(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    className="h-8 w-full" 
+                    placeholder="Окончание"
+                  />
                 </div>
               </div>
             </div>
@@ -221,7 +270,7 @@ export function ProjectsCard() {
 
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="space-y-3">
-            {projects.map((project) => (
+            {sortedProjects.map((project) => (
               <div key={project.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1">
@@ -229,7 +278,7 @@ export function ProjectsCard() {
                       {editId === project.id ? (
                         <input className="h-7 px-2 rounded border bg-background text-sm flex-1" value={editTitle} onChange={(e)=> setEditTitle(e.target.value)} placeholder="Название проекта" />
                       ) : (
-                        <div className="font-medium">{project.name}</div>
+                        <button className="font-medium text-left" onClick={() => { setDetailProjectId(project.id); setDetailOpen(true) }}>{project.name}</button>
                       )}
                       <span className={`px-2 py-1 rounded text-xs ${statusColors[project.status]}`}>
                         {project.status}
@@ -269,16 +318,52 @@ export function ProjectsCard() {
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
+                                                 </div>
+
+                {/* Task counts */}
+                {(() => {
+                  const c = taskCounts.get(project.id) || { total: 0, open: 0, done: 0 }
+                  return (
+                    <div className="mb-1 text-xs">Задачи: <b>{c.total}</b> (в работе <b>{c.open}</b>, завершено <b>{c.done}</b>)</div>
+                  )
+                })()}
+
+                {/* Aggregates */}
+                <div className="mb-2 text-xs text-muted-foreground">
+                  {(() => {
+                    const projTasks = tasks.filter(t => (t as any).project_id === project.id)
+                    const totalHours = projTasks.reduce((s, t) => s + (t.hours_spent || 0), 0)
+                    const billableSum = projTasks.filter(t => t.billable).reduce((s, t) => {
+                      const rate = (t.applied_hourly_rate ?? t.hourly_rate_override) ?? 0
+                      return s + (rate * (t.hours_spent || 0))
+                    }, 0)
+                    return (
+                      <div className="flex flex-wrap gap-4">
+                        <span>Итого часы: <b>{totalHours}</b></span>
+                        <span>Итого сумма (по биллабельным): <b>{formatCurrency(billableSum, 'RUB')}</b></span>
+                      </div>
+                    )
+                  })()}
                 </div>
 
-                {editId === project.id && (
+                 {editId === project.id && (
                   <div className="mb-2 p-2 border rounded bg-muted/10 text-xs flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground">Статус</span>
                     <div className="w-[160px]"><Select value={editStatus} onChange={(v)=>setEditStatus(v as any)} options={[{value:'active',label:'active'},{value:'completed',label:'completed'},{value:'paused',label:'paused'},{value:'cancelled',label:'cancelled'}]} /></div>
                     <span className="ml-2 text-muted-foreground">Начало</span>
-                    <div className="w-[160px]"><DatePicker value={editStart} onChange={setEditStart} /></div>
+                    <div className="w-[160px]"><DatePicker 
+                      date={editStart ? new Date(editStart) : undefined} 
+                      onDateChange={(newDate) => setEditStart(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      placeholder="Начало"
+                      className="w-full"
+                    /></div>
                     <span className="ml-2 text-muted-foreground">Окончание</span>
-                    <div className="w-[160px]"><DatePicker value={editEnd} onChange={setEditEnd} /></div>
+                    <div className="w-[160px]"><DatePicker 
+                      date={editEnd ? new Date(editEnd) : undefined} 
+                      onDateChange={(newDate) => setEditEnd(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      placeholder="Окончание"
+                      className="w-full"
+                    /></div>
                     <span className="ml-2 text-muted-foreground">Теги</span>
                     <input className="h-7 px-2 rounded border bg-background flex-1 min-w-[180px]" value={editTagsInput} onChange={(e)=> setEditTagsInput(e.target.value)} placeholder="react, ts" />
                     <div className="ml-auto flex items-center gap-2">

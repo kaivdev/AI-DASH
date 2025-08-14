@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useFinance } from '@/stores/useFinance'
 import { useEmployees } from '@/stores/useEmployees'
-import { DatePicker } from '@/components/DatePicker'
+import { useProjects } from '@/stores/useProjects'
+import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { X, Plus, Trash2, Download } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/format'
@@ -15,6 +16,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const add = useFinance((s) => s.add)
   const remove = useFinance((s) => s.remove)
   const employees = useEmployees((s) => s.employees)
+  const projects = useProjects((s) => s.projects)
 
   // quick add form
   const [amount, setAmount] = useState('')
@@ -33,6 +35,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const [categoryFilter, setCategoryFilter] = useState('')
   const [tagsFilter, setTagsFilter] = useState('')
   const [employeeFilter, setEmployeeFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState('')
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date')
@@ -47,6 +50,19 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     setSelected(new Set(ids))
   }
   function clearSelection() { setSelected(new Set()) }
+
+  // Add period presets state
+  const [preset, setPreset] = useState<'7'|'30'|'90'|'all'>('30')
+
+  // Apply preset to date filters
+  useEffect(() => {
+    const today = new Date()
+    const toISO = (d: Date) => d.toISOString().slice(0,10)
+    if (preset === 'all') { setDateFrom(''); setDateTo(''); return }
+    const n = preset==='7'?7:preset==='30'?30:90
+    const start = new Date(today); start.setDate(today.getDate() - (n-1))
+    setDateFrom(toISO(start)); setDateTo(toISO(today))
+  }, [preset])
 
   useEffect(() => {
     if (open) {
@@ -73,6 +89,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
         if (!list.some((tg: string) => (tg || '').toLowerCase().includes(tf))) return false
       }
       if (employeeFilter && (t as any).employee_id !== employeeFilter) return false
+      if (projectFilter && (t as any).project_id !== projectFilter) return false
       if (query) {
         const q = query.toLowerCase()
         if (!(t.category || '').toLowerCase().includes(q) && !(t.description || '').toLowerCase().includes(q)) return false
@@ -86,7 +103,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
       if (sortBy === 'date') return mul * a.date.localeCompare(b.date)
       return mul * (a.amount - b.amount)
     })
-  }, [txs, filterType, dateFrom, dateTo, categoryFilter, tagsFilter, employeeFilter, query, minAmount, maxAmount, sortBy, sortDir])
+  }, [txs, filterType, dateFrom, dateTo, categoryFilter, tagsFilter, employeeFilter, projectFilter, query, minAmount, maxAmount, sortBy, sortDir])
 
   // charts
   const pieData = useMemo(() => {
@@ -133,7 +150,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     })
   }, [filtered])
 
-  // stats
+  // stats + per-project summary
   const stats = useMemo(() => {
     const expenses = filtered.filter(t => (t as any).transaction_type === 'expense')
     const income = filtered.filter(t => (t as any).transaction_type === 'income')
@@ -147,7 +164,16 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     // avg per day (by dates present in filtered)
     const daySet = new Set(filtered.map(t => t.date))
     const days = Math.max(1, daySet.size)
-    return { expSum, incSum, top3, avgExpense: expSum / days, avgIncome: incSum / days }
+    // per project
+    const byProject = new Map<string, { income: number; expense: number }>()
+    for (const t of filtered) {
+      const pid = ((t as any).project_id || '—') as string
+      const row = byProject.get(pid) || { income: 0, expense: 0 }
+      if ((t as any).transaction_type === 'income') row.income += t.amount
+      else row.expense += t.amount
+      byProject.set(pid, row)
+    }
+    return { expSum, incSum, top3, avgExpense: expSum / days, avgIncome: incSum / days, byProject }
   }, [filtered])
 
   function onAdd() {
@@ -194,6 +220,12 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
           <div className="p-5 border-b flex items-center justify-between gap-3">
             <div className="font-semibold">Финансы</div>
             <div className="flex items-center gap-2">
+              <div className="text-xs inline-flex items-center gap-1 mr-2">
+                <button className={`h-7 px-2 rounded border ${preset==='7'?'bg-muted':''}`} onClick={()=>setPreset('7')}>7д</button>
+                <button className={`h-7 px-2 rounded border ${preset==='30'?'bg-muted':''}`} onClick={()=>setPreset('30')}>30д</button>
+                <button className={`h-7 px-2 rounded border ${preset==='90'?'bg-muted':''}`} onClick={()=>setPreset('90')}>90д</button>
+                <button className={`h-7 px-2 rounded border ${preset==='all'?'bg-muted':''}`} onClick={()=>setPreset('all')}>Все</button>
+              </div>
               <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={exportCSV}><Download className="h-4 w-4" /> Export CSV</button>
               <button className="h-8 w-8 rounded border inline-flex items-center justify-center" onClick={onClose} aria-label="Закрыть"><X className="h-4 w-4" /></button>
             </div>
@@ -202,10 +234,10 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
           <div className="p-5 space-y-4 overflow-auto">
             {/* Quick stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Сумма доходов</div><div className="text-lg font-semibold text-green-600 dark:text-green-400">{formatCurrency(stats.incSum,'USD')}</div></div>
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Сумма расходов</div><div className="text-lg font-semibold text-red-600 dark:text-red-400">{formatCurrency(stats.expSum,'USD')}</div></div>
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Средний дневной доход</div><div className="text-lg font-semibold">{formatCurrency(stats.avgIncome,'USD')}</div></div>
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Средний дневной расход</div><div className="text-lg font-semibold">{formatCurrency(stats.avgExpense,'USD')}</div></div>
+              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Сумма доходов</div><div className="text-lg font-semibold text-green-600 dark:text-green-400">{formatCurrency(stats.incSum,'RUB')}</div></div>
+              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Сумма расходов</div><div className="text-lg font-semibold text-red-600 dark:text-red-400">{formatCurrency(stats.expSum,'RUB')}</div></div>
+              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Средний дневной доход</div><div className="text-lg font-semibold">{formatCurrency(stats.avgIncome,'RUB')}</div></div>
+              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Средний дневной расход</div><div className="text-lg font-semibold">{formatCurrency(stats.avgExpense,'RUB')}</div></div>
             </div>
 
             {/* Charts */}
@@ -244,9 +276,22 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
 
             {/* Quick add */}
             <div className="p-4 border rounded bg-muted/10 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+              <div className="md:col-span-12 text-xs text-muted-foreground flex flex-wrap gap-4">
+                {Array.from(stats.byProject?.entries?.() || []).slice(0,6).map(([pid, v]) => (
+                  <div key={pid} className="inline-flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-muted">{projects.find(p=>p.id===pid)?.name || pid}</span>
+                    <span className="text-green-600">+{v.income}</span>
+                    <span className="text-red-600">-{v.expense}</span>
+                  </div>
+                ))}
+              </div>
               <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Сумма" type="number" value={amount} onChange={(e)=>setAmount(e.target.value)} /></div>
               <div className="md:col-span-2"><Select className="w-full" value={type} onChange={(v)=> setType(v as any)} options={[{value:'income',label:'доход'},{value:'expense',label:'расход'}]} /></div>
-              <div className="md:col-span-2"><DatePicker value={date} onChange={setDate} /></div>
+              <div className="md:col-span-2"><DatePicker 
+                date={date ? new Date(date) : undefined} 
+                onDateChange={(newDate) => setDate(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                placeholder="Дата"
+              /></div>
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Категория" value={category} onChange={(e)=>setCategory(e.target.value)} /></div>
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Теги (через запятую)" value={tags} onChange={(e)=>setTags(e.target.value)} /></div>
               <div className="md:col-span-3"><Select className="w-full" value={employeeId} onChange={setEmployeeId} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
@@ -258,11 +303,20 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
             <div className="p-4 border rounded bg-muted/5 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Поиск (категория/описание)" value={query} onChange={(e)=>setQuery(e.target.value)} /></div>
               <div className="md:col-span-2"><Select className="w-full" value={filterType} onChange={(v)=>setFilterType(v as any)} options={[{value:'all',label:'Все'},{value:'income',label:'Доходы'},{value:'expense',label:'Расходы'}]} /></div>
-              <div className="md:col-span-2"><DatePicker value={dateFrom} onChange={setDateFrom} /></div>
-              <div className="md:col-span-2"><DatePicker value={dateTo} onChange={setDateTo} /></div>
+              <div className="md:col-span-2"><DatePicker 
+                date={dateFrom ? new Date(dateFrom) : undefined} 
+                onDateChange={(newDate) => setDateFrom(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                placeholder="От даты"
+              /></div>
+              <div className="md:col-span-2"><DatePicker 
+                date={dateTo ? new Date(dateTo) : undefined} 
+                onDateChange={(newDate) => setDateTo(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                placeholder="До даты"
+              /></div>
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Категория" value={categoryFilter} onChange={(e)=>setCategoryFilter(e.target.value)} /></div>
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Теги" value={tagsFilter} onChange={(e)=>setTagsFilter(e.target.value)} /></div>
-              <div className="md:col-span-2"><Select className="w-full" value={employeeFilter} onChange={setEmployeeFilter} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
+                             <div className="md:col-span-2"><Select className="w-full" value={employeeFilter} onChange={setEmployeeFilter} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
+               <div className="md:col-span-2"><Select className="w-full" value={projectFilter} onChange={setProjectFilter} options={[{value:'',label:'Проект'},...projects.map(p=>({value:p.id,label:p.name}))]} /></div>
               <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder=">= сумма" type="number" value={minAmount} onChange={(e)=>setMinAmount(e.target.value)} /></div>
               <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="<= сумма" type="number" value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} /></div>
               <div className="md:col-span-1"><Select className="w-full" value={sortBy} onChange={(v)=>setSortBy(v as any)} options={[{value:'date',label:'Дата'},{value:'amount',label:'Сумма'}]} /></div>
@@ -309,7 +363,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                             {(t as any).transaction_type === 'income' ? 'доход' : 'расход'}
                           </span>
                         </td>
-                        <td className="py-2 pr-2 text-right font-medium">{formatCurrency(t.amount, 'USD')}</td>
+                        <td className="py-2 pr-2 text-right font-medium">{formatCurrency(t.amount, 'RUB')}</td>
                         <td className="py-2 pr-2">{t.category || '-'}</td>
                         <td className="py-2 pr-2">
                           {tagsArr.length > 0 ? (

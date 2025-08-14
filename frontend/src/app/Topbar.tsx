@@ -1,12 +1,15 @@
-import { ModulePicker } from '@/features/modules/ModulePicker'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/stores/useAuth'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTasks } from '@/stores/useTasks'
 import { useSettings } from '@/stores/useSettings'
-import { Moon, Sun } from 'lucide-react'
+import { Moon, Sun, Menu } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Drawer } from '@/components/ui/drawer'
+import { registry, type ModuleKey } from '@/features/modules/registry'
+import { useModules } from '@/stores/useModules'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export function Topbar() {
   const user = useAuth((s) => s.user)
@@ -17,6 +20,13 @@ export function Topbar() {
   const [initialQuery, setInitialQuery] = useState<string>('')
   const theme = useSettings((s) => s.theme)
   const setTheme = useSettings((s) => s.setTheme)
+  const autoAlign = useSettings((s) => s.autoAlign)
+  const setAutoAlign = useSettings((s) => s.setAutoAlign)
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const enabled = useModules((s) => s.enabled)
+  const enable = useModules((s) => s.enable)
+  const disable = useModules((s) => s.disable)
 
   function openChat(autoQuery?: string) {
     setInitialQuery((autoQuery || '').trim())
@@ -32,9 +42,19 @@ export function Topbar() {
     setTheme(next)
   }
 
+  const enabledKeys = new Set(enabled.map((m) => m.key))
+
   return (
     <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container h-14 flex items-center gap-4">
+        <button
+          onClick={() => setMenuOpen(true)}
+          className="h-8 w-8 rounded border inline-flex items-center justify-center hover:bg-muted/40"
+          aria-label="Открыть меню"
+          title="Меню"
+        >
+          <Menu className="h-4 w-4" />
+        </button>
         <Link to="/" className="font-semibold hover:underline whitespace-nowrap">AI Life Dashboard</Link>
         <div className="flex-1 flex justify-center">
           {user && (
@@ -64,16 +84,56 @@ export function Topbar() {
           >
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
-          {user && onDashboard && <ModulePicker />}
-          {user ? (
-            <Link to="/account" className="h-8 px-3 rounded border text-sm inline-flex items-center justify-center hover:bg-muted/40">
-              {user.name}
-            </Link>
-          ) : (
+          {!user && (
             <Link to="/login" className="h-8 px-3 rounded border text-sm inline-flex items-center justify-center hover:bg-muted/40">Войти</Link>
           )}
         </div>
       </div>
+
+      <Drawer open={menuOpen} onClose={() => setMenuOpen(false)} side="left" title="Меню" widthClassName="w-[92vw] max-w-md">
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <div className="text-sm font-medium text-muted-foreground">Навигация</div>
+            {user ? (
+              <Link to="/account" onClick={() => setMenuOpen(false)} className="block rounded border px-3 py-2 hover:bg-muted/40">
+                Профиль: {user.name}
+              </Link>
+            ) : (
+              <Link to="/login" onClick={() => setMenuOpen(false)} className="block rounded border px-3 py-2 hover:bg-muted/40">
+                Войти
+              </Link>
+            )}
+            {user && onDashboard && (
+              <button
+                onClick={() => setAutoAlign(!autoAlign)}
+                className={`w-full text-left rounded border px-3 py-2 text-sm hover:bg-muted/40 ${autoAlign ? 'bg-green-500/10 border-green-500/50' : ''}`}
+                title="Автовыравнивание"
+                aria-pressed={autoAlign}
+              >
+                Автовыравнивание: {autoAlign ? 'Вкл.' : 'Выкл.'}
+              </button>
+            )}
+          </div>
+
+          {user && (
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-muted-foreground">Модули</div>
+              <div className="space-y-2">
+                {Object.keys(registry).map((key) => {
+                  const k = key as ModuleKey
+                  const isOn = enabledKeys.has(k)
+                  return (
+                    <label key={k} className="flex items-center justify-between rounded border px-3 py-2 hover:bg-muted/30">
+                      <div className="font-medium capitalize">{k}</div>
+                      <Checkbox checked={isOn} onCheckedChange={() => (isOn ? disable(k) : enable(k))} />
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </Drawer>
 
       {aiOpen && createPortal(
         <AIChatModal
@@ -199,7 +259,7 @@ function AIChatModal({ onClose, initialQuery = '' }: { onClose: () => void; init
               ))}
               {loading && (
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-500/10 flex items-center justify_center">🤖</div>
+                  <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-500/10 flex items-center justify-center">🤖</div>
                   <div className="px-4 py-2 rounded-2xl border text-sm bg-muted/10">
                     <span className="inline-block animate-pulse">Печатает…</span>
                   </div>

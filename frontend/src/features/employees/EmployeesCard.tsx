@@ -4,10 +4,12 @@ import { formatCurrency } from '@/lib/format'
 import { useEffect, useState } from 'react'
 import { EmployeeBoardDialog } from './EmployeeBoardDialog'
 import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
+import { EmployeeDetailDrawer } from './EmployeeDetailDrawer'
 
 export function EmployeesCard() {
   const employees = useEmployees((s) => s.employees)
   const add = useEmployees((s) => s.add)
+  const update = useEmployees((s) => s.update)
   const updateStatus = useEmployees((s) => s.updateStatus)
   const remove = useEmployees((s) => s.remove)
   const fetchEmployees = useEmployees((s) => s.fetchEmployees)
@@ -18,12 +20,16 @@ export function EmployeesCard() {
   const [email, setEmail] = useState('')
   const [salary, setSalary] = useState('')
   const [revenue, setRevenue] = useState('')
+  const [hourlyRate, setHourlyRate] = useState('')
 
   const [statusId, setStatusId] = useState('')
   const [newStatus, setNewStatus] = useState('')
   const [statusTag, setStatusTag] = useState('')
 
   const [boardOpen, setBoardOpen] = useState(false)
+
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchEmployees()
@@ -45,6 +51,7 @@ export function EmployeesCard() {
       email: email.trim() || undefined,
       salary: salary ? Number(salary) : undefined,
       revenue: revenue ? Number(revenue) : undefined,
+      hourly_rate: hourlyRate ? Number(hourlyRate) : undefined,
       current_status: 'Новый сотрудник',
       status_tag: undefined,
       status_date: new Date().toISOString().slice(0, 10),
@@ -64,6 +71,8 @@ export function EmployeesCard() {
     setNewStatus('')
     setStatusTag('')
   }
+
+  const detailEmployee = detailEmployeeId ? employees.find(e => e.id === detailEmployeeId) || null : null
 
   return (
     <ModuleCard
@@ -87,6 +96,16 @@ export function EmployeesCard() {
         onRemove={(id) => remove(id)}
         onUpdateStatus={(id, s, t) => updateStatus(id, s, t)}
       />
+
+      <EmployeeDetailDrawer
+        open={detailOpen}
+        employee={detailEmployee}
+        onClose={() => setDetailOpen(false)}
+        onEdit={async (id, patch) => { try { await update(id, patch) } catch {} }}
+        onDelete={async (id) => { try { await remove(id) } catch {} setDetailOpen(false) }}
+        onUpdateStatus={async (id, s, t) => { try { await updateStatus(id, s, t) } catch {} }}
+      />
+
       <div className="flex flex-col gap-4 h-full min-h-0">
         <div className="text-sm text-muted-foreground">Всего: {employees.length}</div>
 
@@ -140,6 +159,16 @@ export function EmployeesCard() {
                   placeholder="150000"
                 />
               </div>
+              <div>
+                <label className="text-xs mb-1 block">Почасовая ставка (₽/ч)</label>
+                <input 
+                  type="number"
+                  value={hourlyRate} 
+                  onChange={(e) => setHourlyRate(e.target.value)}
+                  className="h-8 px-3 rounded border bg-background w-full text-sm"
+                  placeholder="1500"
+                />
+              </div>
             </div>
             <button 
               className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2"
@@ -156,7 +185,7 @@ export function EmployeesCard() {
               <div key={emp.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    <div className="font-medium">{emp.name}</div>
+                    <button className="font-medium text-left" onClick={() => { setDetailEmployeeId(emp.id); setDetailOpen(true) }}>{emp.name}</button>
                     <div className="text-sm text-muted-foreground">{emp.position}</div>
                     {emp.email && (
                       <div className="text-xs text-muted-foreground">{emp.email}</div>
@@ -174,10 +203,13 @@ export function EmployeesCard() {
                 <div className="text_sm mb-2">
                   <div className="flex items-center gap-4">
                     {typeof emp.salary === 'number' && (
-                      <span>💰 {formatCurrency(emp.salary, 'USD')}</span>
+                      <span>💰 {formatCurrency(emp.salary, 'RUB')}</span>
                     )}
                     {typeof emp.revenue === 'number' && (
-                      <span className="text-green-600 dark:text-green-300">📈 {formatCurrency(emp.revenue, 'USD')}</span>
+                      <span className="text-green-600 dark:text-green-300">📈 {formatCurrency(emp.revenue, 'RUB')}</span>
+                    )}
+                    {(emp as any).hourly_rate !== undefined && (
+                      <span>⏱ {(emp as any).hourly_rate} ₽/ч</span>
                     )}
                   </div>
                 </div>

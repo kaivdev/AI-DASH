@@ -18,6 +18,8 @@ class Employee(Base):
     status_date = Column(Date, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # New: hourly rate in RUB (integer, no kopecks)
+    hourly_rate = Column(Integer, nullable=True)
     
     # Relationships
     transactions = relationship("Transaction", back_populates="employee")
@@ -62,6 +64,8 @@ class ProjectMember(Base):
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     employee_id = Column(String, ForeignKey("employees.id"), nullable=False)
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
+    # New: project-specific hourly rate (RUB)
+    hourly_rate = Column(Integer, nullable=True)
     
     # Relationships
     project = relationship("Project", back_populates="members")
@@ -78,6 +82,7 @@ class Transaction(Base):
     description = Column(String, nullable=True)
     tags = Column(JSON, default=list)
     employee_id = Column(String, ForeignKey("employees.id"), nullable=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -96,6 +101,11 @@ class Task(Base):
     project_id = Column(String, ForeignKey("projects.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # New: time tracking and rates
+    hours_spent = Column(Float, nullable=False, default=0.0)
+    billable = Column(Boolean, nullable=False, default=True)
+    hourly_rate_override = Column(Integer, nullable=True)
+    applied_hourly_rate = Column(Integer, nullable=True)
     
     # Relationships
     assigned_employee = relationship("Employee", back_populates="tasks")

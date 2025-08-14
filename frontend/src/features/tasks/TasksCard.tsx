@@ -9,7 +9,7 @@ import { ConfirmDialog } from '@/app/ConfirmDialog'
 import { TaskDetailDialog } from './TaskDetailDialog'
 import { TaskBoardDialog } from './TaskBoardDialog'
 import { Pencil, Trash2, Plus, X } from 'lucide-react'
-import { DatePicker } from '@/components/DatePicker'
+import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { Checkbox } from '@/components/ui/checkbox'
 
@@ -18,6 +18,8 @@ const priorityColors: Record<Priority, string> = {
   M: 'border-yellow-300 dark:border-yellow-500/50 shadow-[0_0_0_1px_rgba(234,179,8,0.15)]',
   H: 'border-red-300 dark:border-red-500/50 shadow-[0_0_0_1px_rgba(239,68,68,0.15)]',
 }
+
+const priorityWeight: Record<Priority, number> = { H: 3, M: 2, L: 1 }
 
 const priorityLabels: Record<Priority, string> = {
   L: 'Низкий',
@@ -57,6 +59,14 @@ function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpe
             <span className="px-2 py-1 rounded bg-gray-100 text-gray-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20">
               {priorityLabels[task.priority]}
             </span>
+            <span className="px-2 py-1 rounded bg-gray-100 text-gray-800 dark:bg-gray-500/10 dark:text-gray-300 dark:ring-1 dark:ring-gray-500/20">
+              ⏱ {(task.hours_spent || 0)} ч
+            </span>
+            {task.billable && (
+              <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20">
+                ₽/ч {task.applied_hourly_rate ?? task.hourly_rate_override ?? '—'}
+              </span>
+            )}
             {task.due_date && (
               <span className={`px-2 py-1 rounded ${
                 task.due_date === today
@@ -128,6 +138,8 @@ export function TasksCard() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailTask, setDetailTask] = useState<Task | null>(null)
   const [headerDetailOpen, setHeaderDetailOpen] = useState(false)
+  const [boardInitialProjectId, setBoardInitialProjectId] = useState<string>('')
+  const [boardInitialStatus, setBoardInitialStatus] = useState<'active'|'done'|'all'>('all')
 
   // Load data on mount
   useEffect(() => {
@@ -135,10 +147,16 @@ export function TasksCard() {
     fetchEmployees()
   }, [fetchTasks, fetchEmployees])
 
-  // Open TaskBoardDialog by header title click
+  // Open TaskBoardDialog by header title click (with optional filters)
   useEffect(() => {
     function onTitleClick(e: any) {
-      if (e?.detail?.id === 'tasks') setHeaderDetailOpen(true)
+      if (e?.detail?.id === 'tasks') {
+        const pid = e?.detail?.filterProjectId || ''
+        const st = e?.detail?.filterStatus || 'all'
+        setBoardInitialProjectId(pid)
+        setBoardInitialStatus(st)
+        setHeaderDetailOpen(true)
+      }
     }
     window.addEventListener('module-title-click', onTitleClick as any)
     return () => window.removeEventListener('module-title-click', onTitleClick as any)
@@ -165,12 +183,18 @@ export function TasksCard() {
     const future = active.filter(t => t.due_date && t.due_date > tomorrow)
     const noDue = active.filter(t => !t.due_date)
 
-    // sort active groups by due date asc within each
-    const byDueAsc = (a: Task, b: Task) => (a.due_date || '').localeCompare(b.due_date || '')
-    overdue.sort(byDueAsc)
-    todayList.sort(byDueAsc)
-    tomorrowList.sort(byDueAsc)
-    future.sort(byDueAsc)
+    // sort active groups: priority desc, then due date asc
+    const byPriorityThenDue = (a: Task, b: Task) => {
+      const pw = priorityWeight as any
+      const pdiff = (pw[b.priority] - pw[a.priority])
+      if (pdiff !== 0) return pdiff
+      return (a.due_date || '').localeCompare(b.due_date || '')
+    }
+    overdue.sort(byPriorityThenDue)
+    todayList.sort(byPriorityThenDue)
+    tomorrowList.sort(byPriorityThenDue)
+    future.sort(byPriorityThenDue)
+    noDue.sort((a,b)=> (priorityWeight as any)[b.priority] - (priorityWeight as any)[a.priority])
 
     return { overdue, todayList, tomorrowList, future, noDue, completed }
   }, [tasks])
@@ -183,6 +207,15 @@ export function TasksCard() {
     setDue(task.due_date || '')
     setAssignedTo(task.assigned_to || '')
     setProjectId(task.project_id || '')
+    // прокрутка к началу карточки + фокус на поле задачи
+    setTimeout(() => { 
+      try { 
+        const card = document.querySelector('[data-module-id="tasks"]') || document.querySelector('#tasks'); 
+        card && (card as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' }); 
+        const input = document.querySelector('input[placeholder="Что нужно сделать..."]') as HTMLInputElement | null
+        if (input) input.focus()
+      } catch {}
+    }, 0)
   }
 
   function onDelete(taskId: string) {
@@ -193,6 +226,8 @@ export function TasksCard() {
   async function onToggle(taskId: string) {
     try {
       await toggle(taskId)
+      // refresh finance to reflect auto-generated expense
+      try { (await import('@/stores/useFinance')).useFinance.getState().fetch().catch(()=>{}) } catch {}
     } catch (error) {
       console.error('Failed to toggle task:', error)
     }
@@ -248,9 +283,10 @@ export function TasksCard() {
           task={detailTask}
           employeeName={detailTask?.assigned_to ? employees.find(e => e.id === detailTask?.assigned_to)?.name ?? null : null}
           projectName={detailTask?.project_id ? projects.find(p => p.id === detailTask?.project_id)?.name ?? null : null}
-          inline={true}
+          employees={employees}
+          projects={projects}
           onClose={() => setDetailOpen(false)}
-          onEdit={(t) => { onStartEdit(t); setDetailOpen(false) }}
+          onEdit={async (t) => { try { await update(t.id, { content: t.content, priority: t.priority, due_date: t.due_date, assigned_to: t.assigned_to, project_id: t.project_id, hours_spent: t.hours_spent, billable: t.billable, hourly_rate_override: t.hourly_rate_override }); } catch {} }}
           onToggle={(id) => onToggle(id)}
           onDelete={(id) => { setDetailOpen(false); onDelete(id) }}
         />
@@ -266,6 +302,8 @@ export function TasksCard() {
           onToggle={onToggle}
           onDelete={onDelete}
           onAdd={add}
+          initialProjectId={boardInitialProjectId}
+          initialStatus={boardInitialStatus}
         />
 
         {editingTask && (
@@ -299,7 +337,12 @@ export function TasksCard() {
                 </div>
                 <div>
                   <label className="text-xs mb-1 block">Срок</label>
-                  <DatePicker value={due} onChange={setDue} className="h-8" />
+                  <DatePicker 
+                    date={due ? new Date(due) : undefined} 
+                    onDateChange={(newDate) => setDue(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    className="h-8 w-full" 
+                    placeholder="Срок"
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -320,16 +363,32 @@ export function TasksCard() {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs mb-1 block">Часы</label>
+                  <input id="quick-hours" className="h-8 px-2 rounded border bg-background w-full text-sm" type="number" step="0.25" defaultValue={0} />
+                </div>
+                <div>
+                  <label className="text-xs mb-1 block">Ставка (override, ₽/ч)</label>
+                  <input id="quick-rate" className="h-8 px-2 rounded border bg-background w-full text-sm" type="number" placeholder="Пусто — из сотрудника/проекта" />
+                </div>
+                <label className="flex items-center gap-2 mt-6 text-sm">
+                  <input id="quick-billable" type="checkbox" defaultChecked /> Биллабельно
+                </label>
+              </div>
               <div className="flex gap-2">
                 <button className="h-8 px-3 rounded border text-sm hover:bg-muted/40" onClick={async () => {
                   if (!content.trim()) return
+                  const hours = Number((document.getElementById('quick-hours') as HTMLInputElement)?.value || '0') || 0
+                  const rateStr = (document.getElementById('quick-rate') as HTMLInputElement)?.value
+                  const billable = (document.getElementById('quick-billable') as HTMLInputElement)?.checked ?? true
                   if (editingTask) {
-                    await update(editingTask.id, { content: content.trim(), priority, due_date: due || undefined, assigned_to: assignedTo || undefined, project_id: projectId || undefined })
+                    await update(editingTask.id, { content: content.trim(), priority, due_date: due || undefined, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, hourly_rate_override: rateStr ? Number(rateStr) : undefined, billable })
                     setEditingTask(null)
                   } else {
-                    await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, created_at: undefined as any, updated_at: undefined as any } as any)
+                    await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, hourly_rate_override: rateStr ? Number(rateStr) : undefined, billable, created_at: undefined as any, updated_at: undefined as any } as any)
                   }
-                  setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); setShowForm(false)
+                  setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); (document.getElementById('quick-hours') as HTMLInputElement).value='0'; (document.getElementById('quick-rate') as HTMLInputElement).value=''; (document.getElementById('quick-billable') as HTMLInputElement).checked=true; setShowForm(false)
                 }}>Сохранить</button>
                 <button className="h-8 px-3 rounded border text-sm hover:bg-muted/40" onClick={() => { setEditingTask(null); setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); setShowForm(false) }}>Отмена</button>
               </div>

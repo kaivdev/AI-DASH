@@ -15,6 +15,40 @@ from database import engine, get_db
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
+# Ensure new columns exist for SQLite (simple online migration)
+from sqlalchemy import text
+
+def _ensure_sqlite_columns():
+    try:
+        with engine.connect() as conn:
+            # employees.hourly_rate
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('employees')")).fetchall()]
+            if 'hourly_rate' not in cols:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN hourly_rate INTEGER"))
+            # project_members.hourly_rate
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('project_members')")).fetchall()]
+            if 'hourly_rate' not in cols:
+                conn.execute(text("ALTER TABLE project_members ADD COLUMN hourly_rate INTEGER"))
+            # tasks new columns
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('tasks')")).fetchall()]
+            if 'hours_spent' not in cols:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN hours_spent REAL DEFAULT 0.0 NOT NULL"))
+            if 'billable' not in cols:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN billable BOOLEAN DEFAULT 1 NOT NULL"))
+            if 'hourly_rate_override' not in cols:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN hourly_rate_override INTEGER"))
+            if 'applied_hourly_rate' not in cols:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN applied_hourly_rate INTEGER"))
+            # transactions.project_id
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('transactions')")).fetchall()]
+            if 'project_id' not in cols:
+                conn.execute(text("ALTER TABLE transactions ADD COLUMN project_id TEXT"))
+            conn.commit()
+    except Exception as e:
+        print(f"Migration check error: {e}")
+
+_ensure_sqlite_columns()
+
 app = FastAPI(title="Dashboard API", version="1.0.0")
 
 # Configure CORS
@@ -208,6 +242,11 @@ def add_project_member(project_id: str, member: schemas.ProjectMemberAdd, db: Se
     if crud.add_project_member(db, project_id, member.employee_id):
         return {"message": "Member added successfully"}
     raise HTTPException(status_code=400, detail="Member already exists or invalid data")
+
+@app.put("/api/projects/{project_id}/members/{employee_id}/rate", response_model=schemas.MessageResponse)
+def set_project_member_rate(project_id: str, employee_id: str, hourly_rate: int | None = None, db: Session = Depends(get_db)):
+    crud.set_project_member_rate(db, project_id, employee_id, hourly_rate)
+    return {"message": "Rate updated"}
 
 @app.delete("/api/projects/{project_id}/members/{employee_id}", response_model=schemas.MessageResponse)
 def remove_project_member(project_id: str, employee_id: str, db: Session = Depends(get_db)):

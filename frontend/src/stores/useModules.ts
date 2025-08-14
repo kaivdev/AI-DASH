@@ -16,7 +16,7 @@ interface GridPosition {
 
 export type EnabledModule = { 
   key: ModuleKey; 
-  size: '1x1' | '2x1' | '2x2'; 
+  size: '1x1' | '2x1' | '2x2' | '3x1' | '3x2'; 
   order: number; 
   rowSpan?: number;
   lastPosition?: ModulePosition;
@@ -45,7 +45,7 @@ function defaultSizeFor(key: ModuleKey): EnabledModule['size'] {
 }
 
 function defaultRowSpanForSize(size: EnabledModule['size']): number {
-  if (size === '2x2') return 2
+  if (size === '2x2' || size === '3x2') return 2
   return 1
 }
 
@@ -112,7 +112,7 @@ export const useModules = create<ModulesState>()(
         })),
       setRowSpan: (key, units) =>
         set((state) => ({
-          enabled: state.enabled.map((m) => (m.key === key ? { ...m, rowSpan: Math.max(1, Math.min(8, Math.round(units))) } : m)),
+          enabled: state.enabled.map((m) => (m.key === key ? { ...m, rowSpan: Math.max(1, Math.min(4, Math.round(units))) } : m)),
         })),
       savePosition: (key, pos) =>
         set((state) => ({

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Task, Priority } from '@/types/core'
 import { Pencil, CheckSquare, Square, Trash2, X, PlusCircle } from 'lucide-react'
-import { DatePicker } from '@/components/DatePicker'
+import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { Checkbox } from '@/components/ui/checkbox'
 
@@ -17,16 +17,18 @@ interface TaskBoardDialogProps {
   onToggle: (id: string) => void
   onDelete: (id: string) => void
   onAdd: (data: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => Promise<void>
+  initialProjectId?: string
+  initialStatus?: 'active' | 'done' | 'all'
 }
 
-export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onOpenDetail, onStartEdit, onToggle, onDelete, onAdd }: TaskBoardDialogProps) {
+export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onOpenDetail, onStartEdit, onToggle, onDelete, onAdd, initialProjectId, initialStatus }: TaskBoardDialogProps) {
   const [show, setShow] = useState(false)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<'all' | Priority>('all')
-  const [status, setStatus] = useState<'active' | 'done' | 'all'>('all')
+  const [status, setStatus] = useState<'active' | 'done' | 'all'>(initialStatus ?? 'all')
   const [due, setDue] = useState<'all' | 'today' | 'tomorrow' | 'overdue' | 'nodue'>('all')
   const [assignee, setAssignee] = useState<string>('')
-  const [project, setProject] = useState<string>('')
+  const [project, setProject] = useState<string>(initialProjectId || '')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   // Quick add
@@ -51,8 +53,8 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
     }
   }, [open])
 
-  const filtered = useMemo(() => {
-    return tasks.filter((t) => {
+     const filtered = useMemo(() => {
+    const list = tasks.filter((t) => {
       if (priority !== 'all' && t.priority !== priority) return false
       if (status !== 'all') {
         const needDone = status === 'done'
@@ -72,6 +74,8 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
       }
       return true
     })
+    const pw: any = { H: 3, M: 2, L: 1 }
+    return list.sort((a,b)=> (pw[b.priority]-pw[a.priority]) || (a.due_date||'').localeCompare(b.due_date||''))
   }, [tasks, priority, status, assignee, project, due, query, today, tomorrow])
 
   function toggleSelect(id: string) {
@@ -142,7 +146,11 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
                   <Select value={newPriority} onChange={(v)=>setNewPriority(v as Priority)} options={[{value:'L',label:'Низкий'},{value:'M',label:'Средний'},{value:'H',label:'Высокий'}]} />
                 </div>
                 <div className="md:col-span-1 md:row-start-1 md:col-start-5">
-                  <DatePicker value={newDue} onChange={setNewDue} />
+                  <DatePicker 
+                    date={newDue ? new Date(newDue) : undefined} 
+                    onDateChange={(newDate) => setNewDue(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    placeholder="Срок"
+                  />
                 </div>
                 <div className="md:col-span-1 md:row-start-1 md:col-start-6 flex justify-end">
                   <button

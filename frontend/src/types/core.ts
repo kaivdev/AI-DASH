@@ -18,6 +18,10 @@ export interface Task {
   done: boolean
   assigned_to?: string // renamed from assignedTo
   project_id?: string // renamed from projectId
+  hours_spent: number
+  billable: boolean
+  hourly_rate_override?: number
+  applied_hourly_rate?: number
   created_at: string
   updated_at?: string
 }
@@ -47,6 +51,7 @@ export interface Employee {
   current_status: string // renamed from currentStatus
   status_tag?: string // renamed from statusTag
   status_date: string // renamed from statusDate
+  hourly_rate?: number
   created_at: string
   updated_at?: string
 }

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { Project } from '@/types/core'
 import { Plus, X, Trash2, Pencil } from 'lucide-react'
 import { Select } from '@/components/Select'
-import { DatePicker } from '@/components/DatePicker'
+import { DatePicker } from '@/components/ui/date-picker'
 
 interface ProjectBoardDialogProps {
   open: boolean
@@ -159,8 +159,16 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                 <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-3" placeholder="Название проекта" value={name} onChange={(e) => setName(e.target.value)} />
                 <div className="md:col-span-2"><Select className="w-full" value={status} onChange={(v)=>setStatus(v as any)} options={[{value:'active',label:'active'},{value:'completed',label:'completed'},{value:'paused',label:'paused'},{value:'cancelled',label:'cancelled'}]} /></div>
                 <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-3" placeholder="Теги (через запятую)" value={tagInput} onChange={(e) => setTagInput(e.target.value)} />
-                <div className="md:col-span-2"><DatePicker value={newStart} onChange={setNewStart} /></div>
-                <div className="md:col-span-2"><DatePicker value={newEnd} onChange={setNewEnd} /></div>
+                <div className="md:col-span-2"><DatePicker 
+                  date={newStart ? new Date(newStart) : undefined} 
+                  onDateChange={(newDate) => setNewStart(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                  placeholder="Дата начала"
+                /></div>
+                <div className="md:col-span-2"><DatePicker 
+                  date={newEnd ? new Date(newEnd) : undefined} 
+                  onDateChange={(newDate) => setNewEnd(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                  placeholder="Дата окончания"
+                /></div>
                 <div className="md:col-span-2 flex justify-end">
                   <button className="h-9 w-full px-4 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center justify-center gap-2" onClick={onQuickAdd}>
                     <Plus className="h-4 w-4" /> Добавить
@@ -180,11 +188,19 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                 <>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">С</span>
-                    <DatePicker value={startFrom} onChange={setStartFrom} />
+                    <DatePicker 
+                      date={startFrom ? new Date(startFrom) : undefined} 
+                      onDateChange={(newDate) => setStartFrom(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      placeholder="От"
+                    />
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">По</span>
-                    <DatePicker value={startTo} onChange={setStartTo} />
+                    <DatePicker 
+                      date={startTo ? new Date(startTo) : undefined} 
+                      onDateChange={(newDate) => setStartTo(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      placeholder="До"
+                    />
                   </div>
                 </>
               )}

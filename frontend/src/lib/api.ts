@@ -74,6 +74,9 @@ export const projectApi = {
   removeMember: (projectId: string, employeeId: string) => apiRequest(`/projects/${projectId}/members/${employeeId}`, {
     method: 'DELETE',
   }),
+  setMemberRate: (projectId: string, employeeId: string, hourly_rate: number | null) => apiRequest(`/projects/${projectId}/members/${employeeId}/rate${hourly_rate!==null?`?hourly_rate=${hourly_rate}`:''}`, {
+    method: 'PUT',
+  }),
   addLink: (projectId: string, link: any) => apiRequest(`/projects/${projectId}/links`, {
     method: 'POST',
     body: JSON.stringify(link),

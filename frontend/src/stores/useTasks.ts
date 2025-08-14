@@ -21,17 +21,21 @@ function generateId() {
 // Миграция сохраненных данных старого формата в новый
 function migrateTasks(raw: any): Task[] {
   if (!Array.isArray(raw)) return []
-  return raw.map((t: any) => ({
-    id: t.id,
-    content: t.content,
-    priority: t.priority,
-    due_date: t.due ?? t.due_date ?? undefined,
-    done: !!t.done,
-    assigned_to: t.assignedTo ?? t.assigned_to ?? undefined,
-    project_id: t.projectId ?? t.project_id ?? undefined,
-    created_at: t.created_at ?? new Date().toISOString(),
-    updated_at: t.updated_at ?? new Date().toISOString(),
-  }))
+       return raw.map((t: any) => ({
+      id: t.id,
+      content: t.content,
+      priority: t.priority,
+      due_date: t.due ?? t.due_date ?? undefined,
+      done: !!t.done,
+      assigned_to: t.assignedTo ?? t.assigned_to ?? undefined,
+      project_id: t.projectId ?? t.project_id ?? undefined,
+      hours_spent: typeof t.hours_spent === 'number' ? t.hours_spent : 0,
+      billable: typeof t.billable === 'boolean' ? t.billable : true,
+      hourly_rate_override: typeof t.hourly_rate_override === 'number' ? t.hourly_rate_override : undefined,
+      applied_hourly_rate: typeof t.applied_hourly_rate === 'number' ? t.applied_hourly_rate : undefined,
+      created_at: t.created_at ?? new Date().toISOString(),
+      updated_at: t.updated_at ?? new Date().toISOString(),
+    }))
 }
 
 const seed: Task[] = [
@@ -40,6 +44,8 @@ const seed: Task[] = [
     content: 'Попробовать новый модуль Metrics', 
     priority: 'M', 
     done: true,
+    hours_spent: 0,
+    billable: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -48,6 +54,8 @@ const seed: Task[] = [
     content: 'Добавить первую заметку', 
     priority: 'M', 
     done: false,
+    hours_spent: 0,
+    billable: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -57,6 +65,8 @@ const seed: Task[] = [
     priority: 'H', 
     due_date: new Date().toISOString().slice(0,10), 
     done: false,
+    hours_spent: 0,
+    billable: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -89,14 +99,17 @@ export const useTasks = create<TasksState>()(
       add: async (task) => {
         set({ loading: true, error: null })
         try {
-          const apiData = {
-            content: task.content,
-            priority: task.priority,
-            due_date: task.due_date || null,
-            done: task.done,
-            assigned_to: task.assigned_to || null,
-            project_id: task.project_id || null
-          }
+                     const apiData = {
+             content: task.content,
+             priority: task.priority,
+             due_date: task.due_date || null,
+             done: task.done,
+             assigned_to: task.assigned_to || null,
+             project_id: task.project_id || null,
+             hours_spent: typeof task.hours_spent === 'number' ? task.hours_spent : 0,
+             billable: typeof task.billable === 'boolean' ? task.billable : true,
+             hourly_rate_override: task.hourly_rate_override ?? null,
+           }
           
           const newTask = await taskApi.create(apiData) as Task
           set((state) => ({
@@ -105,12 +118,14 @@ export const useTasks = create<TasksState>()(
           }))
         } catch (error) {
           console.error('Failed to create task:', error)
-          const localTask: Task = {
-            id: generateId(),
-            ...task,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
+                     const localTask: Task = {
+             id: generateId(),
+             ...task,
+             hours_spent: typeof task.hours_spent === 'number' ? task.hours_spent : 0,
+             billable: typeof task.billable === 'boolean' ? task.billable : true,
+             created_at: new Date().toISOString(),
+             updated_at: new Date().toISOString()
+           }
           set((state) => ({
             tasks: [localTask, ...state.tasks],
             loading: false,
@@ -140,7 +155,7 @@ export const useTasks = create<TasksState>()(
       update: async (id, patch) => {
         set({ loading: true, error: null })
         try {
-          const updatedTask = await taskApi.update(id, patch) as Task
+                     const updatedTask = await taskApi.update(id, patch as any) as Task
           set((state) => ({
             tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
             loading: false

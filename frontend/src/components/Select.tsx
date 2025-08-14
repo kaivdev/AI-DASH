@@ -32,12 +32,12 @@ export function Select({
   return (
     <RadixSelect.Root value={value} onValueChange={handleChange} disabled={disabled}>
       <RadixSelect.Trigger
-        className={`h-9 w-full inline-flex items-center justify-between rounded border bg-background px-3 text-sm ${className}`}
+        className={`h-9 w-full inline-flex items-center justify-between gap-2 rounded border bg-background px-3 text-sm min-w-0 overflow-hidden whitespace-nowrap text-ellipsis ${className}`}
         aria-label={computedPlaceholder || placeholder}
       >
         <RadixSelect.Value placeholder={<span className="text-muted-foreground">{computedPlaceholder || placeholder}</span>} />
         <RadixSelect.Icon>
-          <ChevronDown className="h-4 w-4 opacity-70" />
+          <ChevronDown className="h-4 w-4 opacity-70 flex-shrink-0" />
         </RadixSelect.Icon>
       </RadixSelect.Trigger>
       <RadixSelect.Portal>

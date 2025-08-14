@@ -15,6 +15,7 @@ function getMonthKey(d: string) {
 export function FinanceCard() {
   const txs = useFinance((s) => s.txs)
   const remove = useFinance((s) => s.remove)
+  const fetchFinance = useFinance((s) => s.fetch)
   const employees = useEmployees((s) => s.employees)
 
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -22,10 +23,11 @@ export function FinanceCard() {
   const [period, setPeriod] = useState<'7' | '30' | '90' | 'all'>('7')
 
   useEffect(() => {
+    fetchFinance().catch(()=>{})
     function onTitleClick(e: any) { if (e?.detail?.id === 'finance') setDialogOpen(true) }
     window.addEventListener('module-title-click', onTitleClick as any)
     return () => window.removeEventListener('module-title-click', onTitleClick as any)
-  }, [])
+  }, [fetchFinance])
 
   // Summary
   const income = txs.filter((t) => (t as any).transaction_type === 'income').reduce((s, t) => s + t.amount, 0)
@@ -80,15 +82,15 @@ export function FinanceCard() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="rounded border p-3 text-center">
             <div className="text-xs text-muted-foreground">Доходы</div>
-            <div className="text-2xl font-semibold text-green-600 dark:text-green-400">{formatCurrency(income, 'USD')}</div>
+                         <div className="text-2xl font-semibold text-green-600 dark:text-green-400">{formatCurrency(income, 'RUB')}</div>
           </div>
           <div className="rounded border p-3 text-center">
             <div className="text-xs text-muted-foreground">Расходы</div>
-            <div className="text-2xl font-semibold text-red-600 dark:text-red-400">{formatCurrency(expense, 'USD')}</div>
+                         <div className="text-2xl font-semibold text-red-600 dark:text-red-400">{formatCurrency(expense, 'RUB')}</div>
           </div>
           <div className="rounded border p-3 text-center">
             <div className="text-xs text-muted-foreground">Баланс</div>
-            <div className="text-2xl font-semibold">{formatCurrency(balance, 'USD')}</div>
+                         <div className="text-2xl font-semibold">{formatCurrency(balance, 'RUB')}</div>
           </div>
         </div>
 
@@ -121,8 +123,8 @@ export function FinanceCard() {
               <div key={t.id} className="px-3 py-2 rounded border flex items-center justify-between">
                 <div className="text-xs text-muted-foreground w-24">{formatDate(t.date)}</div>
                 <div className="text-sm flex-1 truncate">{t.category || '-'}</div>
-                <div className={(t as any).transaction_type === 'income' ? 'text-green-500 font-medium' : 'text-red-500 font-medium'}>
-                  {(t as any).transaction_type === 'income' ? '+' : '-'}{formatCurrency(t.amount, 'USD')}
+                                 <div className={(t as any).transaction_type === 'income' ? 'text-green-500 font-medium' : 'text-red-500 font-medium'}>
+                  {(t as any).transaction_type === 'income' ? '+' : '-'}{formatCurrency(t.amount, 'RUB')}
                 </div>
                 <button className="ml-3 h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => remove(t.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
               </div>

@@ -1,8 +1,8 @@
-export function formatCurrency(value: number, currency: string = 'USD', locale: string = navigator?.language ?? 'en-US') {
+export function formatCurrency(value: number, currency: string = 'RUB', locale: string = navigator?.language ?? 'ru-RU') {
   try {
-    return new Intl.NumberFormat(locale, { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
+    return new Intl.NumberFormat(locale, { style: 'currency', currency, maximumFractionDigits: 0, maximumSignificantDigits: 12 }).format(value)
   } catch {
-    return value.toFixed(2)
+    return String(Math.round(value))
   }
 }
 

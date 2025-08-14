@@ -43,7 +43,6 @@ export function SortableModuleItem({
       <motion.div
         ref={setNodeRef}
         style={style}
-        whileHover={{ scale: 1.01 }}
         className={cn(
           'relative min-h-0 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
           'hover:shadow-lg transition',

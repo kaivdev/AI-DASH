@@ -5,6 +5,7 @@ import uuid
 from datetime import date, datetime
 import hashlib
 import os
+import math
 
 import models
 import schemas
@@ -42,14 +43,38 @@ def serialize_user(user: models.User) -> dict:
         "profile": profile_dict,
     }
 
-def ensure_user_profile(db: Session, user_id: str) -> models.UserProfile:
-    profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == user_id).first()
-    if not profile:
-        profile = models.UserProfile(user_id=user_id)
-        db.add(profile)
-        db.commit()
-        db.refresh(profile)
-    return profile
+# --- Helpers for rates/time ---
+def _round_hours(hours: float, step: float = 1.0) -> float:
+    """Return whole hours only (no fractions)."""
+    if hours is None:
+        return 0.0
+    try:
+        return float(int(max(0.0, float(hours))))
+    except Exception:
+        return 0.0
+
+def _resolve_hourly_rate(db: Session, task: models.Task) -> Optional[int]:
+    """Resolve hourly rate for a task: override -> project member -> employee."""
+    if task.hourly_rate_override is not None:
+        return int(task.hourly_rate_override)
+    # try project member specific rate
+    if task.project_id and task.assigned_to:
+        pm = (
+            db.query(models.ProjectMember)
+            .filter(
+                models.ProjectMember.project_id == task.project_id,
+                models.ProjectMember.employee_id == task.assigned_to,
+            )
+            .first()
+        )
+        if pm and pm.hourly_rate is not None:
+            return int(pm.hourly_rate)
+    # fallback to employee rate
+    if task.assigned_to:
+        emp = db.query(models.Employee).filter(models.Employee.id == task.assigned_to).first()
+        if emp and emp.hourly_rate is not None:
+            return int(emp.hourly_rate)
+    return None
 
 # Seed owner and registration code
 OWNER_EMAIL = "kaivasfilm@yandex.ru"
@@ -171,15 +196,17 @@ def delete_employee(db: Session, employee_id: str) -> bool:
 # Project CRUD
 def get_projects(db: Session) -> List[models.Project]:
     projects = db.query(models.Project).all()
-    # Add member_ids to each project
+    # Add member_ids and member_rates to each project
     for project in projects:
         project.member_ids = [m.employee_id for m in project.members]
+        project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
     return projects
 
 def get_project(db: Session, project_id: str) -> Optional[models.Project]:
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if project:
         project.member_ids = [m.employee_id for m in project.members]
+        project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
     return project
 
 def create_project(db: Session, project: schemas.ProjectCreate) -> models.Project:
@@ -224,6 +251,21 @@ def add_project_member(db: Session, project_id: str, employee_id: str) -> bool:
         db.commit()
         return True
     return False
+
+def set_project_member_rate(db: Session, project_id: str, employee_id: str, hourly_rate: Optional[int]) -> bool:
+    member = db.query(models.ProjectMember).filter(
+        and_(models.ProjectMember.project_id == project_id,
+             models.ProjectMember.employee_id == employee_id)
+    ).first()
+    if not member:
+        # Create membership if missing (SQLite may not enforce FKs; this enables rate usage immediately)
+        member = models.ProjectMember(project_id=project_id, employee_id=employee_id)
+        db.add(member)
+        db.commit()
+        db.refresh(member)
+    member.hourly_rate = int(hourly_rate) if hourly_rate is not None else None
+    db.commit()
+    return True
 
 def remove_project_member(db: Session, project_id: str, employee_id: str) -> bool:
     db_member = db.query(models.ProjectMember).filter(
@@ -372,6 +414,24 @@ def toggle_task(db: Session, task_id: str) -> Optional[models.Task]:
     db_task = get_task(db, task_id)
     if db_task:
         db_task.done = not db_task.done
+        # On closing task (done -> True) generate expense if billable
+        if db_task.done:
+            applied_rate = _resolve_hourly_rate(db, db_task)
+            db_task.applied_hourly_rate = applied_rate
+            if db_task.billable and applied_rate and (db_task.hours_spent or 0) > 0:
+                hours = _round_hours(db_task.hours_spent or 0.0)
+                amount = float(applied_rate) * float(hours)
+                tx = models.Transaction(
+                    id=generate_id(),
+                    transaction_type="expense",
+                    amount=amount,
+                    date=date.today(),
+                    category="Почасовая оплата",
+                    description=f"Задача: {db_task.content}",
+                    employee_id=db_task.assigned_to,
+                    project_id=db_task.project_id,
+                )
+                db.add(tx)
         db.commit()
         db.refresh(db_task)
     return db_task

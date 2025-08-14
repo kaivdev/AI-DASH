@@ -75,16 +75,17 @@ export const useEmployees = create<EmployeesState>()(
       add: async (employee) => {
         set({ loading: true, error: null })
         try {
-          const apiData = {
-            name: employee.name,
-            position: employee.position,
-            email: employee.email || null,
-            salary: employee.salary || null,
-            revenue: employee.revenue || null,
-            current_status: employee.current_status,
-            status_tag: employee.status_tag || null,
-            status_date: employee.status_date
-          }
+                     const apiData = {
+             name: employee.name,
+             position: employee.position,
+             email: employee.email || null,
+             salary: employee.salary || null,
+             revenue: employee.revenue || null,
+             hourly_rate: (employee as any).hourly_rate || null,
+             current_status: employee.current_status,
+             status_tag: employee.status_tag || null,
+             status_date: employee.status_date
+           }
           
           const newEmployee = await employeeApi.create(apiData) as Employee
           set((state) => ({ 

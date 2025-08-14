@@ -202,9 +202,9 @@ export function MainGrid() {
       if (grid.clientWidth === 0) colCount = 1
     }
     const colWidth = grid && colCount > 0 ? (grid.clientWidth - columnGap * (colCount - 1)) / colCount : 320
-    const span = activeModule.size === '1x1' ? 1 : 2
-    const width = span === 1 ? colWidth : colWidth * 2 + columnGap
-    const computedRowSpan = activeModule.rowSpan ?? (activeModule.size === '2x2' ? 2 : 1)
+    const cols = activeModule.size.startsWith('3x') ? 3 : activeModule.size.startsWith('2x') ? 2 : 1
+    const width = cols === 1 ? colWidth : cols === 2 ? colWidth * 2 + columnGap : colWidth * 3 + columnGap * 2
+    const computedRowSpan = activeModule.rowSpan ?? (activeModule.size === '2x2' || activeModule.size === '3x2' ? 2 : 1)
     const height = computedRowSpan * rowH + (computedRowSpan - 1) * columnGap
     return { width, height }
   }, [activeModule, rowH])
@@ -230,23 +230,20 @@ export function MainGrid() {
             if (!m) return null
             const Mod = registry[m.key]
             if (!Mod) return null
-            const computedRowSpan = m.rowSpan ?? (m.size === '2x2' ? 2 : 1)
+            const computedRowSpan = m.rowSpan ?? (m.size === '2x2' || m.size === '3x2' ? 2 : 1)
             return (
               <SortableModuleItem
                 key={m.key}
                 id={m.key}
                 className={cn(
+                  m.size.startsWith('3x') && 'col-span-3',
                   m.size === '2x2' && 'col-span-2',
                   m.size === '2x1' && 'col-span-2',
                   m.size === '1x1' && 'col-span-1',
                   computedRowSpan === 1 && 'row-span-1',
                   computedRowSpan === 2 && 'row-span-2',
                   computedRowSpan === 3 && 'row-span-3',
-                  computedRowSpan === 4 && 'row-span-4',
-                  computedRowSpan === 5 && 'row-span-5',
-                  computedRowSpan === 6 && 'row-span-6',
-                  computedRowSpan === 7 && 'row-span-7',
-                  computedRowSpan === 8 && 'row-span-8'
+                  computedRowSpan === 4 && 'row-span-4'
                 )}
               >
                 <Mod />

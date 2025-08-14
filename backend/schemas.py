@@ -12,6 +12,7 @@ class EmployeeBase(BaseModel):
     current_status: str
     status_tag: Optional[str] = None
     status_date: date
+    hourly_rate: Optional[int] = None
 
 class EmployeeCreate(EmployeeBase):
     pass
@@ -25,6 +26,7 @@ class EmployeeUpdate(BaseModel):
     current_status: Optional[str] = None
     status_tag: Optional[str] = None
     status_date: Optional[date] = None
+    hourly_rate: Optional[int] = None
 
 class EmployeeStatusUpdate(BaseModel):
     current_status: str
@@ -78,6 +80,7 @@ class Project(ProjectBase):
     id: str
     links: List[ProjectLink] = []
     member_ids: List[str] = []
+    member_rates: dict[str, int | None] = {}
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -93,6 +96,7 @@ class TransactionBase(BaseModel):
     description: Optional[str] = None
     tags: List[str] = []
     employee_id: Optional[str] = None
+    project_id: Optional[str] = None
 
 class TransactionCreate(TransactionBase):
     pass
@@ -105,6 +109,7 @@ class TransactionUpdate(BaseModel):
     description: Optional[str] = None
     tags: Optional[List[str]] = None
     employee_id: Optional[str] = None
+    project_id: Optional[str] = None
 
 class Transaction(TransactionBase):
     id: str
@@ -122,6 +127,9 @@ class TaskBase(BaseModel):
     done: bool = False
     assigned_to: Optional[str] = None
     project_id: Optional[str] = None
+    hours_spent: float = 0.0
+    billable: bool = True
+    hourly_rate_override: Optional[int] = None
 
 class TaskCreate(TaskBase):
     pass
@@ -133,11 +141,15 @@ class TaskUpdate(BaseModel):
     done: Optional[bool] = None
     assigned_to: Optional[str] = None
     project_id: Optional[str] = None
+    hours_spent: Optional[float] = None
+    billable: Optional[bool] = None
+    hourly_rate_override: Optional[int] = None
 
 class Task(TaskBase):
     id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+    applied_hourly_rate: Optional[int] = None
 
     class Config:
         from_attributes = True
