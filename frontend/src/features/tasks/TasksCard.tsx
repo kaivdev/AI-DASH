@@ -12,6 +12,7 @@ import { Pencil, Trash2, Plus, X } from 'lucide-react'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { Checkbox } from '@/components/ui/checkbox'
+import { useAuth } from '@/stores/useAuth'
 
 const priorityColors: Record<Priority, string> = {
   L: 'border-green-300 dark:border-green-500/50 shadow-[0_0_0_1px_rgba(34,197,94,0.15)]',
@@ -35,9 +36,10 @@ interface TaskItemProps {
   onDelete: (id: string) => void
   onEdit: (task: Task) => void
   onOpen: (task: Task) => void
+  isAdmin: boolean
 }
 
-function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpen }: TaskItemProps) {
+function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpen, isAdmin }: TaskItemProps) {
   const employee = task.assigned_to ? employees.find(e => e.id === task.assigned_to) : null
   const project = task.project_id ? projects.find(p => p.id === task.project_id) : null
   
@@ -56,13 +58,16 @@ function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpe
             {task.content}
           </button>
           <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground">
+            {task.done && !task.approved && (
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" title="Ожидает подтверждения"></span>
+            )}
             <span className="px-2 py-1 rounded bg-gray-100 text-gray-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20">
               {priorityLabels[task.priority]}
             </span>
             <span className="px-2 py-1 rounded bg-gray-100 text-gray-800 dark:bg-gray-500/10 dark:text-gray-300 dark:ring-1 dark:ring-gray-500/20">
               ⏱ {(task.hours_spent || 0)} ч
             </span>
-            {task.billable && (
+            {isAdmin && task.billable && (
               <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20">
                 ₽/ч {task.applied_hourly_rate ?? task.hourly_rate_override ?? '—'}
               </span>
@@ -96,17 +101,20 @@ function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpe
             onClick={() => onEdit(task)}
             title="Редактировать"
             aria-label="Редактировать"
+            disabled={!isAdmin && task.assigned_to !== (employees.find(e=>e.id===task.assigned_to)?.id)}
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
-          <button
-            className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-            onClick={() => onDelete(task.id)}
-            title="Удалить"
-            aria-label="Удалить"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          {isAdmin && (
+            <button
+              className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
+              onClick={() => onDelete(task.id)}
+              title="Удалить"
+              aria-label="Удалить"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -123,6 +131,8 @@ export function TasksCard() {
   const employees = useEmployees((s) => s.employees)
   const fetchEmployees = useEmployees((s) => s.fetchEmployees)
   const projects = useProjects((s) => s.projects)
+  const user = useAuth((s)=>s.user)
+  const isAdmin = (user?.role === 'owner' || user?.role === 'admin')
 
   const [showForm, setShowForm] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -320,6 +330,7 @@ export function TasksCard() {
                   onChange={(e) => setContent(e.target.value)}
                   className="h-8 px-3 rounded border bg-background w-full text-sm"
                   placeholder="Что нужно сделать..."
+                  disabled={!isAdmin}
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -333,6 +344,7 @@ export function TasksCard() {
                       { value: 'M', label: 'Средний' },
                       { value: 'H', label: 'Высокий' },
                     ]}
+                    disabled={!isAdmin}
                   />
                 </div>
                 <div>
@@ -342,6 +354,7 @@ export function TasksCard() {
                     onDateChange={(newDate) => setDue(newDate ? newDate.toISOString().slice(0, 10) : '')} 
                     className="h-8 w-full" 
                     placeholder="Срок"
+                    disabled={!isAdmin}
                   />
                 </div>
               </div>
@@ -352,6 +365,7 @@ export function TasksCard() {
                     value={assignedTo}
                     onChange={setAssignedTo}
                     options={[{ value: '', label: 'Не выбран' }, ...Object.values(employeesById).map((e: any) => ({ value: e.id, label: e.name }))]}
+                    disabled={!isAdmin}
                   />
                 </div>
                 <div>
@@ -360,6 +374,7 @@ export function TasksCard() {
                     value={projectId}
                     onChange={setProjectId}
                     options={[{ value: '', label: 'Не выбран' }, ...Object.values(projectsById).map((p: any) => ({ value: p.id, label: p.name }))]}
+                    disabled={!isAdmin}
                   />
                 </div>
               </div>
@@ -368,29 +383,31 @@ export function TasksCard() {
                   <label className="text-xs mb-1 block">Часы</label>
                   <input id="quick-hours" className="h-8 px-2 rounded border bg-background w-full text-sm" type="number" step="0.25" defaultValue={0} />
                 </div>
-                <div>
-                  <label className="text-xs mb-1 block">Ставка (override, ₽/ч)</label>
-                  <input id="quick-rate" className="h-8 px-2 rounded border bg-background w-full text-sm" type="number" placeholder="Пусто — из сотрудника/проекта" />
-                </div>
+                {isAdmin && (
+                  <div>
+                    <label className="text-xs mb-1 block">Ставка (override, ₽/ч)</label>
+                    <input id="quick-rate" className="h-8 px-2 rounded border bg-background w-full text-sm" type="number" placeholder="Пусто — из сотрудника/проекта" />
+                  </div>
+                )}
                 <label className="flex items-center gap-2 mt-6 text-sm">
-                  <input id="quick-billable" type="checkbox" defaultChecked /> Биллабельно
+                  <input id="quick-billable" type="checkbox" defaultChecked disabled={!isAdmin} /> Биллабельно
                 </label>
               </div>
               <div className="flex gap-2">
                 <button className="h-8 px-3 rounded border text-sm hover:bg-muted/40" onClick={async () => {
-                  if (!content.trim()) return
+                  if (!content.trim() && isAdmin) return
                   const hours = Number((document.getElementById('quick-hours') as HTMLInputElement)?.value || '0') || 0
                   const rateStr = (document.getElementById('quick-rate') as HTMLInputElement)?.value
                   const billable = (document.getElementById('quick-billable') as HTMLInputElement)?.checked ?? true
                   if (editingTask) {
-                    await update(editingTask.id, { content: content.trim(), priority, due_date: due || undefined, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, hourly_rate_override: rateStr ? Number(rateStr) : undefined, billable })
+                    await update(editingTask.id, { content: isAdmin ? content.trim() : undefined as any, priority: isAdmin ? priority : undefined as any, due_date: isAdmin ? (due || undefined) : undefined as any, assigned_to: isAdmin ? (assignedTo || undefined) : undefined as any, project_id: isAdmin ? (projectId || undefined) : undefined as any, hours_spent: hours, hourly_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable: isAdmin ? billable : undefined as any })
                     setEditingTask(null)
                   } else {
-                    await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, hourly_rate_override: rateStr ? Number(rateStr) : undefined, billable, created_at: undefined as any, updated_at: undefined as any } as any)
+                    await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, hourly_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable, created_at: undefined as any, updated_at: undefined as any } as any)
                   }
-                  setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); (document.getElementById('quick-hours') as HTMLInputElement).value='0'; (document.getElementById('quick-rate') as HTMLInputElement).value=''; (document.getElementById('quick-billable') as HTMLInputElement).checked=true; setShowForm(false)
-                }}>Сохранить</button>
-                <button className="h-8 px-3 rounded border text-sm hover:bg-muted/40" onClick={() => { setEditingTask(null); setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); setShowForm(false) }}>Отмена</button>
+                  setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); (document.getElementById('quick-hours') as HTMLInputElement).value='0'; const rateEl=document.getElementById('quick-rate') as HTMLInputElement | null; if(rateEl) rateEl.value=''; (document.getElementById('quick-billable') as HTMLInputElement).checked=true; setShowForm(false)
+                }}>{isAdmin ? 'Сохранить' : 'Списать часы'}</button>
+                {isAdmin && (<button className="h-8 px-3 rounded border text-sm hover:bg-muted/40" onClick={() => { setEditingTask(null); setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); setShowForm(false) }}>Отмена</button>)}
               </div>
             </div>
           </div>
@@ -403,7 +420,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2 text-red-600">Истекшие ({overdue.length})</h4>
                 <div className="space-y-2">
                   {overdue.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -414,7 +431,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Сегодня ({todayList.length})</h4>
                 <div className="space-y-2">
                   {todayList.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -425,7 +442,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Завтра ({tomorrowList.length})</h4>
                 <div className="space-y-2">
                   {tomorrowList.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -436,7 +453,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Будущие ({future.length})</h4>
                 <div className="space-y-2">
                   {future.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -447,7 +464,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Без срока ({noDue.length})</h4>
                 <div className="space-y-2">
                   {noDue.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -458,7 +475,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2 text-green-600">Выполненные ({completed.length})</h4>
                 <div className="space-y-2">
                   {completed.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>

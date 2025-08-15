@@ -22,6 +22,8 @@ export interface Task {
   billable: boolean
   hourly_rate_override?: number
   applied_hourly_rate?: number
+  approved?: boolean
+  approved_at?: string
   created_at: string
   updated_at?: string
 }

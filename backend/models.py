@@ -20,6 +20,8 @@ class Employee(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     # New: hourly rate in RUB (integer, no kopecks)
     hourly_rate = Column(Integer, nullable=True)
+    # Link to app user (optional, unique per user)
+    user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=True)
     
     # Relationships
     transactions = relationship("Transaction", back_populates="employee")
@@ -67,6 +69,10 @@ class ProjectMember(Base):
     # New: project-specific hourly rate (RUB)
     hourly_rate = Column(Integer, nullable=True)
     
+    __table_args__ = (
+        UniqueConstraint("project_id", "employee_id", name="uq_project_members_pair"),
+    )
+    
     # Relationships
     project = relationship("Project", back_populates="members")
     employee = relationship("Employee", back_populates="project_memberships")
@@ -106,6 +112,9 @@ class Task(Base):
     billable = Column(Boolean, nullable=False, default=True)
     hourly_rate_override = Column(Integer, nullable=True)
     applied_hourly_rate = Column(Integer, nullable=True)
+    # New: admin approval for completion
+    approved = Column(Boolean, nullable=False, default=False)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     assigned_employee = relationship("Employee", back_populates="tasks")
@@ -125,6 +134,8 @@ class Goal(Base):
     tags = Column(JSON, default=list)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Owner user id (scoping)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
 
 class ReadingItem(Base):
     __tablename__ = "reading_items"
@@ -142,6 +153,8 @@ class ReadingItem(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Owner user id (scoping)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
 
 class Note(Base):
     __tablename__ = "notes"
@@ -153,6 +166,8 @@ class Note(Base):
     tags = Column(JSON, default=list)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Owner user id (scoping)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
 
 # --- Auth models ---
 class User(Base):

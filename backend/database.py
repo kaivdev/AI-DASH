@@ -1,15 +1,14 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import os
+from config import settings
 
-# Use SQLite for development
-sqlite_path = os.path.join(os.path.dirname(__file__), "dashboard.db")
-DATABASE_URL = f"sqlite:///{sqlite_path}"
+# Database URL (PostgreSQL)
+DATABASE_URL = settings.DATABASE_URL or settings.db_url
 
 engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False}  # Needed for SQLite
+    DATABASE_URL,
+    pool_pre_ping=True,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -20,6 +19,4 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
-
-print(f"✅ Using SQLite database: {sqlite_path}") 
+        db.close() 

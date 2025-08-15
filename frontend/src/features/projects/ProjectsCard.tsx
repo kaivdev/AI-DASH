@@ -9,9 +9,11 @@ import { DatePicker } from '@/components/ui/date-picker'
 import { ProjectDetailDrawer } from './ProjectDetailDrawer'
 import { useTasks } from '@/stores/useTasks'
 import { formatCurrency } from '@/lib/format'
+import { useAuth } from '@/stores/useAuth'
 
 export function ProjectsCard() {
   const projects = useProjects((s) => s.projects)
+  const fetchProjects = useProjects((s) => (s as any).fetchAll)
   const sortedProjects = projects.slice().sort((a,b)=> (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0))
   const employees = useEmployees((s) => s.employees)
   const add = useProjects((s) => s.add)
@@ -35,6 +37,11 @@ export function ProjectsCard() {
   const addMember = useProjects((s) => s.addMember)
   const removeMember = useProjects((s) => s.removeMember)
   const remove = useProjects((s) => s.remove)
+
+  const user = useAuth((s)=>s.user)
+  const isAdmin = (user?.role === 'owner' || user?.role === 'admin')
+
+  useEffect(() => { try { fetchProjects?.() } catch {} }, [fetchProjects])
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [name, setName] = useState('')
@@ -187,7 +194,6 @@ export function ProjectsCard() {
          onUpdateStatus={(pid, st) => useProjects.getState().update(pid, { status: st } as any)}
          onUpdateProject={(pid, patch) => useProjects.getState().update(pid, patch as any)}
          onUpdateLink={(pid, lid, patch) => useProjects.getState().updateLink(pid, lid, patch as any)}
-         initialProjectId={selectedProject || ''}
        />
 
       <ProjectDetailDrawer
@@ -328,19 +334,19 @@ export function ProjectsCard() {
                   )
                 })()}
 
-                {/* Aggregates */}
+                {/* Aggregates: hide money for non-admins */}
                 <div className="mb-2 text-xs text-muted-foreground">
                   {(() => {
                     const projTasks = tasks.filter(t => (t as any).project_id === project.id)
                     const totalHours = projTasks.reduce((s, t) => s + (t.hours_spent || 0), 0)
-                    const billableSum = projTasks.filter(t => t.billable).reduce((s, t) => {
+                    const billableSum = isAdmin ? projTasks.filter(t => t.billable).reduce((s, t) => {
                       const rate = (t.applied_hourly_rate ?? t.hourly_rate_override) ?? 0
                       return s + (rate * (t.hours_spent || 0))
-                    }, 0)
+                    }, 0) : null
                     return (
                       <div className="flex flex-wrap gap-4">
                         <span>Итого часы: <b>{totalHours}</b></span>
-                        <span>Итого сумма (по биллабельным): <b>{formatCurrency(billableSum, 'RUB')}</b></span>
+                        {isAdmin && <span>Итого сумма (по биллабельным): <b>{formatCurrency(billableSum as any, 'RUB')}</b></span>}
                       </div>
                     )
                   })()}

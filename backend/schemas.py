@@ -262,7 +262,10 @@ class ProjectLinkAdd(BaseModel):
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
+    confirm_password: str
     code: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 class LoginRequest(BaseModel):
     email: EmailStr

@@ -22,6 +22,9 @@ models.Base.metadata.create_all(bind=engine)
 from sqlalchemy import text
 
 def _ensure_sqlite_columns():
+    # Only run on SQLite; no-op for PostgreSQL
+    if engine.dialect.name != "sqlite":
+        return
     try:
         with engine.connect() as conn:
             # employees.hourly_rate
@@ -51,6 +54,35 @@ def _ensure_sqlite_columns():
         print(f"Migration check error: {e}")
 
 _ensure_sqlite_columns()
+
+# Ensure PostgreSQL extra columns/constraints exist
+from sqlalchemy import text as _text
+
+def _ensure_postgres_schema():
+    if engine.dialect.name != "postgresql":
+        return
+    try:
+        with engine.connect() as conn:
+            # employees.user_id unique FK
+            conn.execute(_text("ALTER TABLE IF EXISTS employees ADD COLUMN IF NOT EXISTS user_id TEXT UNIQUE"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='employees' AND constraint_name='employees_user_fk') THEN ALTER TABLE employees ADD CONSTRAINT employees_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
+            # notes/reading_items/goals.user_id
+            conn.execute(_text("ALTER TABLE IF EXISTS notes ADD COLUMN IF NOT EXISTS user_id TEXT"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='notes' AND constraint_name='notes_user_fk') THEN ALTER TABLE notes ADD CONSTRAINT notes_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
+            conn.execute(_text("ALTER TABLE IF EXISTS reading_items ADD COLUMN IF NOT EXISTS user_id TEXT"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='reading_items' AND constraint_name='reading_items_user_fk') THEN ALTER TABLE reading_items ADD CONSTRAINT reading_items_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
+            conn.execute(_text("ALTER TABLE IF EXISTS goals ADD COLUMN IF NOT EXISTS user_id TEXT"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='goals' AND constraint_name='goals_user_fk') THEN ALTER TABLE goals ADD CONSTRAINT goals_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
+            # unique membership
+            conn.execute(_text("CREATE UNIQUE INDEX IF NOT EXISTS uq_project_members_pair ON project_members(project_id, employee_id)"))
+            # task approval columns
+            conn.execute(_text("ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(_text("ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ"))
+            conn.commit()
+    except Exception as e:
+        print(f"PostgreSQL schema ensure error: {e}")
+
+_ensure_postgres_schema()
 
 app = FastAPI(title="Dashboard API", version="1.0.0")
 
@@ -98,7 +130,19 @@ def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    user = crud.create_user(db, email=payload.email, password=payload.password, role="user")
+    # Validate confirm password
+    if getattr(payload, "confirm_password", None) and payload.confirm_password != payload.password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    # Compose name from first/last if provided
+    name = None
+    if getattr(payload, "first_name", None) or getattr(payload, "last_name", None):
+        name = f"{payload.first_name or ''} {payload.last_name or ''}".strip()
+
+    user = crud.create_user(db, email=payload.email, password=payload.password, role="user", name=name)
+    # Ensure employee record linked to this user
+    crud.ensure_employee_for_user(db, user, getattr(payload, "first_name", None), getattr(payload, "last_name", None))
+
     token = crud.create_session(db, user.id)
     return {"user": crud.serialize_user(user), "token": token}
 
@@ -177,7 +221,13 @@ def logout(authorization: Optional[str] = Header(None), db: Session = Depends(ge
 
 # Employee endpoints
 @app.get("/api/employees", response_model=List[schemas.Employee])
-def get_employees(db: Session = Depends(get_db)):
+def get_employees(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+            return [emp] if emp else []
     return crud.get_employees(db)
 
 @app.get("/api/employees/{employee_id}", response_model=schemas.Employee)
@@ -213,7 +263,13 @@ def delete_employee(employee_id: str, db: Session = Depends(get_db)):
 
 # Project endpoints
 @app.get("/api/projects", response_model=List[schemas.Project])
-def get_projects(db: Session = Depends(get_db)):
+def get_projects(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # If auth provided, scope for non-admin users
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            return crud.list_projects_for_user(db, user)
     return crud.get_projects(db)
 
 @app.get("/api/projects/{project_id}", response_model=schemas.Project)
@@ -224,18 +280,36 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     return project
 
 @app.post("/api/projects", response_model=schemas.Project)
-def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)):
+def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can create projects
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     return crud.create_project(db, project)
 
 @app.put("/api/projects/{project_id}", response_model=schemas.Project)
-def update_project(project_id: str, project: schemas.ProjectUpdate, db: Session = Depends(get_db)):
+def update_project(project_id: str, project: schemas.ProjectUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can update projects
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     db_project = crud.update_project(db, project_id, project)
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
     return db_project
 
 @app.delete("/api/projects/{project_id}", response_model=schemas.MessageResponse)
-def delete_project(project_id: str, db: Session = Depends(get_db)):
+def delete_project(project_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can delete projects
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     if crud.delete_project(db, project_id):
         return {"message": "Project deleted successfully"}
     raise HTTPException(status_code=404, detail="Project not found")
@@ -269,7 +343,13 @@ def remove_project_link(project_id: str, link_id: str, db: Session = Depends(get
 
 # Transaction endpoints
 @app.get("/api/transactions", response_model=List[schemas.Transaction])
-def get_transactions(db: Session = Depends(get_db)):
+def get_transactions(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            # скрываем финансы для обычных пользователей
+            return []
     return crud.get_transactions(db)
 
 @app.get("/api/transactions/{transaction_id}", response_model=schemas.Transaction)
@@ -298,7 +378,12 @@ def delete_transaction(transaction_id: str, db: Session = Depends(get_db)):
 
 # Task endpoints
 @app.get("/api/tasks", response_model=List[schemas.Task])
-def get_tasks(db: Session = Depends(get_db)):
+def get_tasks(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            return crud.list_tasks_for_user(db, user)
     return crud.get_tasks(db)
 
 @app.get("/api/tasks/{task_id}", response_model=schemas.Task)
@@ -309,25 +394,92 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
     return task
 
 @app.post("/api/tasks", response_model=schemas.Task)
-def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db)):
+def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can create tasks
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     return crud.create_task(db, task)
 
 @app.put("/api/tasks/{task_id}", response_model=schemas.Task)
-def update_task(task_id: str, task: schemas.TaskUpdate, db: Session = Depends(get_db)):
+def update_task(task_id: str, task: schemas.TaskUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Non-admins may only update their own task hours_spent and done flag; everything else is forbidden
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            # Fetch task and check ownership via employee mapping
+            t = crud.get_task(db, task_id)
+            if not t:
+                raise HTTPException(status_code=404, detail="Task not found")
+            emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+            if not emp or t.assigned_to != emp.id:
+                raise HTTPException(status_code=403, detail="Forbidden")
+            # restrict fields
+            allowed = schemas.TaskUpdate(hours_spent=task.hours_spent, done=task.done)
+            task = allowed
     db_task = crud.update_task(db, task_id, task)
     if not db_task:
         raise HTTPException(status_code=404, detail="Task not found")
     return db_task
 
 @app.put("/api/tasks/{task_id}/toggle", response_model=schemas.Task)
-def toggle_task(task_id: str, db: Session = Depends(get_db)):
+def toggle_task(task_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Role-aware toggle: employee marks done -> awaiting; admin click on awaiting -> approve; admin toggling sets approval with done
+    user = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+
+    current = crud.get_task(db, task_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    is_admin = bool(user and user.role in ("owner", "admin"))
+
+    # If admin clicks on awaiting (done=true, approved=false) -> approve without flipping done
+    if is_admin and current.done and not (getattr(current, "approved", False) or False):
+        try:
+            with engine.begin() as conn:
+                conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = NOW() WHERE id = :id"), {"id": task_id})
+            # refresh
+            current = crud.get_task(db, task_id)
+            return current
+        except Exception:
+            pass
+
+    # Otherwise perform normal toggle
     db_task = crud.toggle_task(db, task_id)
     if not db_task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return db_task
+
+    # Set approval flags based on actor
+    try:
+        if db_task.done:
+            if is_admin:
+                with engine.begin() as conn:
+                    conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = NOW() WHERE id = :id"), {"id": task_id})
+            else:
+                with engine.begin() as conn:
+                    conn.execute(_text("UPDATE tasks SET approved = FALSE, approved_at = NULL WHERE id = :id"), {"id": task_id})
+        else:
+            with engine.begin() as conn:
+                conn.execute(_text("UPDATE tasks SET approved = FALSE, approved_at = NULL WHERE id = :id"), {"id": task_id})
+    except Exception:
+        pass
+
+    return crud.get_task(db, task_id)
 
 @app.delete("/api/tasks/{task_id}", response_model=schemas.MessageResponse)
-def delete_task(task_id: str, db: Session = Depends(get_db)):
+def delete_task(task_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can delete tasks
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     if crud.delete_task(db, task_id):
         return {"message": "Task deleted successfully"}
     raise HTTPException(status_code=404, detail="Task not found")
@@ -370,7 +522,13 @@ def delete_goal(goal_id: str, db: Session = Depends(get_db)):
 
 # Reading Item endpoints
 @app.get("/api/reading", response_model=List[schemas.ReadingItem])
-def get_reading_items(db: Session = Depends(get_db)):
+def get_reading_items(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            # вернём только его записи
+            return db.query(models.ReadingItem).filter(models.ReadingItem.user_id == user.id).order_by(models.ReadingItem.added_date.desc()).all()
     return crud.get_reading_items(db)
 
 @app.get("/api/reading/{item_id}", response_model=schemas.ReadingItem)
@@ -381,8 +539,13 @@ def get_reading_item(item_id: str, db: Session = Depends(get_db)):
     return item
 
 @app.post("/api/reading", response_model=schemas.ReadingItem)
-def create_reading_item(item: schemas.ReadingItemCreate, db: Session = Depends(get_db)):
-    return crud.create_reading_item(db, item)
+def create_reading_item(item: schemas.ReadingItemCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    uid = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        uid = user.id if user else None
+    return crud.create_reading_item(db, item, user_id=uid)
 
 @app.put("/api/reading/{item_id}", response_model=schemas.ReadingItem)
 def update_reading_item(item_id: str, item: schemas.ReadingItemUpdate, db: Session = Depends(get_db)):
@@ -413,7 +576,12 @@ def delete_reading_item(item_id: str, db: Session = Depends(get_db)):
 
 # Note endpoints
 @app.get("/api/notes", response_model=List[schemas.Note])
-def get_notes(db: Session = Depends(get_db)):
+def get_notes(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            return db.query(models.Note).filter(models.Note.user_id == user.id).order_by(models.Note.date.desc()).all()
     return crud.get_notes(db)
 
 @app.get("/api/notes/{note_id}", response_model=schemas.Note)
@@ -424,8 +592,13 @@ def get_note(note_id: str, db: Session = Depends(get_db)):
     return note
 
 @app.post("/api/notes", response_model=schemas.Note)
-def create_note(note: schemas.NoteCreate, db: Session = Depends(get_db)):
-    return crud.create_note(db, note)
+def create_note(note: schemas.NoteCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    uid = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        uid = user.id if user else None
+    return crud.create_note(db, note, user_id=uid)
 
 @app.put("/api/notes/{note_id}", response_model=schemas.Note)
 def update_note(note_id: str, note: schemas.NoteUpdate, db: Session = Depends(get_db)):

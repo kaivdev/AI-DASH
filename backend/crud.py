@@ -43,6 +43,17 @@ def serialize_user(user: models.User) -> dict:
         "profile": profile_dict,
     }
 
+# Ensure user profile exists
+def ensure_user_profile(db: Session, user_id: str) -> models.UserProfile:
+    profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == user_id).first()
+    if profile:
+        return profile
+    profile = models.UserProfile(user_id=user_id)
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
 # --- Helpers for rates/time ---
 def _round_hours(hours: float, step: float = 1.0) -> float:
     """Return whole hours only (no fractions)."""
@@ -141,6 +152,29 @@ def get_user_by_token(db: Session, token: str) -> Optional[models.User]:
         return None
     return db.query(models.User).filter(models.User.id == sess.user_id).first()
 
+# Link user to employee (create if missing)
+def ensure_employee_for_user(db: Session, user: models.User, first_name: Optional[str], last_name: Optional[str]) -> models.Employee:
+    emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+    if emp:
+        return emp
+    full_name = (f"{first_name or ''} {last_name or ''}".strip()) or (user.name or user.email)
+    emp = models.Employee(
+        id=generate_id(),
+        name=full_name,
+        position="Specialist",
+        email=user.email,
+        salary=None,
+        revenue=None,
+        current_status="active",
+        status_tag=None,
+        status_date=date.today(),
+        hourly_rate=None,
+        user_id=user.id,
+    )
+    db.add(emp)
+    db.commit()
+    return emp
+
 # Employee CRUD
 def get_employees(db: Session) -> List[models.Employee]:
     return db.query(models.Employee).all()
@@ -201,6 +235,39 @@ def get_projects(db: Session) -> List[models.Project]:
         project.member_ids = [m.employee_id for m in project.members]
         project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
     return projects
+
+# Scoping helpers
+def list_projects_for_user(db: Session, user: models.User) -> List[models.Project]:
+    if user.role in ("owner", "admin"):
+        return get_projects(db)
+    # For regular users: projects where user's employee record is a member
+    emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+    if not emp:
+        return []
+    projects = (
+        db.query(models.Project)
+        .join(models.ProjectMember, models.ProjectMember.project_id == models.Project.id)
+        .filter(models.ProjectMember.employee_id == emp.id)
+        .all()
+    )
+    for project in projects:
+        project.member_ids = [m.employee_id for m in project.members]
+        project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
+    return projects
+
+def list_tasks_for_user(db: Session, user: models.User) -> List[models.Task]:
+    if user.role in ("owner", "admin"):
+        return get_tasks(db)
+    emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+    if not emp:
+        return []
+    # only tasks assigned directly to the employee
+    return (
+        db.query(models.Task)
+        .filter(models.Task.assigned_to == emp.id)
+        .order_by(models.Task.created_at.desc())
+        .all()
+    )
 
 def get_project(db: Session, project_id: str) -> Optional[models.Project]:
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
@@ -305,18 +372,25 @@ def get_transactions(db: Session) -> List[models.Transaction]:
     return db.query(models.Transaction).order_by(models.Transaction.date.desc()).all()
 
 def finance_summary_month(db: Session, year: int, month: int) -> dict:
+    # DB-agnostic filter by date range (works on SQLite and PostgreSQL)
+    from datetime import date as _date, timedelta as _timedelta
+    start = _date(year, month, 1)
+    if month == 12:
+        end = _date(year + 1, 1, 1)
+    else:
+        end = _date(year, month + 1, 1)
     inc = (
         db.query(func.coalesce(func.sum(models.Transaction.amount), 0.0))
         .filter(models.Transaction.transaction_type == "income")
-        .filter(func.strftime('%Y', models.Transaction.date) == str(year))
-        .filter(func.strftime('%m', models.Transaction.date) == f"{month:02d}")
+        .filter(models.Transaction.date >= start)
+        .filter(models.Transaction.date < end)
         .scalar()
     )
     exp = (
         db.query(func.coalesce(func.sum(models.Transaction.amount), 0.0))
         .filter(models.Transaction.transaction_type == "expense")
-        .filter(func.strftime('%Y', models.Transaction.date) == str(year))
-        .filter(func.strftime('%m', models.Transaction.date) == f"{month:02d}")
+        .filter(models.Transaction.date >= start)
+        .filter(models.Transaction.date < end)
         .scalar()
     )
     return {"income": float(inc or 0), "expense": float(exp or 0), "balance": float((inc or 0) - (exp or 0))}
@@ -451,9 +525,10 @@ def get_goals(db: Session) -> List[models.Goal]:
 def get_goal(db: Session, goal_id: str) -> Optional[models.Goal]:
     return db.query(models.Goal).filter(models.Goal.id == goal_id).first()
 
-def create_goal(db: Session, goal: schemas.GoalCreate) -> models.Goal:
+def create_goal(db: Session, goal: schemas.GoalCreate, user_id: Optional[str] = None) -> models.Goal:
     db_goal = models.Goal(
         id=generate_id(),
+        user_id=user_id,
         **goal.model_dump()
     )
     db.add(db_goal)
@@ -494,9 +569,10 @@ def get_reading_items(db: Session) -> List[models.ReadingItem]:
 def get_reading_item(db: Session, item_id: str) -> Optional[models.ReadingItem]:
     return db.query(models.ReadingItem).filter(models.ReadingItem.id == item_id).first()
 
-def create_reading_item(db: Session, item: schemas.ReadingItemCreate) -> models.ReadingItem:
+def create_reading_item(db: Session, item: schemas.ReadingItemCreate, user_id: Optional[str] = None) -> models.ReadingItem:
     db_item = models.ReadingItem(
         id=generate_id(),
+        user_id=user_id,
         **item.model_dump()
     )
     db.add(db_item)
@@ -548,9 +624,10 @@ def get_notes(db: Session) -> List[models.Note]:
 def get_note(db: Session, note_id: str) -> Optional[models.Note]:
     return db.query(models.Note).filter(models.Note.id == note_id).first()
 
-def create_note(db: Session, note: schemas.NoteCreate) -> models.Note:
+def create_note(db: Session, note: schemas.NoteCreate, user_id: Optional[str] = None) -> models.Note:
     db_note = models.Note(
         id=generate_id(),
+        user_id=user_id,
         **note.model_dump()
     )
     db.add(db_note)

@@ -6,7 +6,7 @@ load_dotenv()
 class Settings:
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", 
-        "postgresql://dashboard_user:password@localhost:5432/dashboard_db"
+        "postgresql+psycopg2://dashboard_user:password@localhost:5432/dashboard_db"
     )
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "dashboard_user")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "password")
@@ -17,6 +17,6 @@ class Settings:
     # Альтернативная конструкция URL если отдельные параметры
     @property
     def db_url(self) -> str:
-        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 settings = Settings() 

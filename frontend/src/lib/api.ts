@@ -192,9 +192,9 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   }),
-  register: (email: string, password: string, code: string) => apiRequest('/auth/register', {
+  register: (p: { email: string, password: string, confirmPassword: string, code: string, firstName?: string, lastName?: string }) => apiRequest('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, code }),
+    body: JSON.stringify({ email: p.email, password: p.password, confirm_password: p.confirmPassword, code: p.code, first_name: p.firstName, last_name: p.lastName }),
   }),
   me: () => apiRequest('/auth/me'),
   updateProfile: (data: { name?: string }) => apiRequest('/auth/profile', {
