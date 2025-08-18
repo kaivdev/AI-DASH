@@ -79,14 +79,13 @@ export function RegisterPage() {
 					/>
 				</div>
 				<div>
-					<label className="text-xs mb-1 block">Код доступа</label>
+					<label className="text-xs mb-1 block">Код приглашения</label>
 					<input
 						type="text"
 						value={code}
 						onChange={(e) => setCode(e.target.value)}
 						className="h-9 px-3 rounded border bg-background w-full text-sm"
-						placeholder="667788"
-						required
+						placeholder="Введите код"
 					/>
 				</div>
 				<button

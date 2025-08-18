@@ -123,33 +123,15 @@ def _resolve_rates(db: Session, task: models.Task) -> tuple[Optional[int], Optio
             bill_rate = int(emp.hourly_rate)
     return cost_rate, bill_rate
 
-# Seed owner and registration code
-OWNER_EMAIL = "kaivasfilm@yandex.ru"
-OWNER_PASSWORD = "zXsWqaed321"
+# Seed default registration code (but do NOT auto-create owner; first registrant will become owner)
 DEFAULT_CODE = "667788"
 
 def ensure_owner_and_code(db: Session) -> None:
-    # registration code
+    # Ensure at least one active registration code exists for initial setup
     code = db.query(models.RegistrationCode).filter(models.RegistrationCode.code == DEFAULT_CODE).first()
     if not code:
         db.add(models.RegistrationCode(code=DEFAULT_CODE, is_active=True))
         db.commit()
-    # owner user
-    user = db.query(models.User).filter(models.User.email == OWNER_EMAIL).first()
-    if not user:
-        salt = uuid.uuid4().hex
-        password_hash = hash_password(OWNER_PASSWORD, salt)
-        owner = models.User(
-            id=generate_id(),
-            email=OWNER_EMAIL,
-            name="Owner",
-            role="owner",
-            password_salt=salt,
-            password_hash=password_hash,
-        )
-        db.add(owner)
-        db.commit()
-        ensure_user_profile(db, owner.id)
 
 # Auth CRUD
 def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
@@ -537,7 +519,7 @@ def get_transactions(db: Session) -> List[models.Transaction]:
     return db.query(models.Transaction).order_by(models.Transaction.date.desc()).all()
 
 def finance_summary_month(db: Session, year: int, month: int) -> dict:
-    # DB-agnostic filter by date range (works on SQLite and PostgreSQL)
+    # DB-agnostic filter by date range
     from datetime import date as _date, timedelta as _timedelta
     start = _date(year, month, 1)
     if month == 12:

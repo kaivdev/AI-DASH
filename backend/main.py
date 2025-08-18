@@ -68,6 +68,14 @@ def _ensure_postgres_schema():
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='task_id') THEN ALTER TABLE transactions ADD COLUMN task_id TEXT; END IF; END $$;"))
             # user_profiles.openrouter_api_key
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='user_profiles' AND column_name='openrouter_api_key') THEN ALTER TABLE user_profiles ADD COLUMN openrouter_api_key TEXT; END IF; END $$;"))
+            # registration_codes.created_by_user_id
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='registration_codes' AND column_name='created_by_user_id') THEN ALTER TABLE registration_codes ADD COLUMN created_by_user_id TEXT; END IF; END $$;"))
+            # users.invited_by_user_id (free-form link; no FK to avoid cross-bootstrap issues)
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='invited_by_user_id') THEN ALTER TABLE users ADD COLUMN invited_by_user_id TEXT; END IF; END $$;"))
+            # Multitenancy: organizations and organization_id columns
+            conn.execute(_text("CREATE TABLE IF NOT EXISTS organizations (id TEXT PRIMARY KEY, name TEXT, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)"))
+            for tbl in ('users','employees','projects','tasks','transactions'):
+                conn.execute(_text(f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='{tbl}' AND column_name='organization_id') THEN ALTER TABLE {tbl} ADD COLUMN organization_id TEXT; END IF; END $$;"))
             conn.commit()
     except Exception as e:
         print(f"PostgreSQL schema ensure error: {e}")
@@ -116,7 +124,7 @@ _PENDING_LINKS: dict[str, dict] = {}
 
 @app.on_event("startup")
 def startup_seed():
-    # Ensure default registration code and owner user exist
+    # Ensure default registration code exists (first registrant becomes owner)
     db = next(get_db())
     try:
         crud.ensure_owner_and_code(db)
@@ -145,10 +153,16 @@ async def health():
 # --- Auth endpoints ---
 @app.post("/api/auth/register", response_model=schemas.AuthResponse)
 def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)):
-    # Verify code
-    code = db.query(models.RegistrationCode).filter(models.RegistrationCode.code == payload.code, models.RegistrationCode.is_active == True).first()
-    if not code:
-        raise HTTPException(status_code=400, detail="Invalid registration code")
+    # Code is optional ONLY for the very first user; otherwise required
+    code = None
+    if getattr(payload, "code", None):
+        code = (
+            db.query(models.RegistrationCode)
+            .filter(models.RegistrationCode.code == payload.code, models.RegistrationCode.is_active == True)
+            .first()
+        )
+        if not code:
+            raise HTTPException(status_code=400, detail="Invalid registration code")
 
     existing = crud.get_user_by_email(db, payload.email)
     if existing:
@@ -163,12 +177,117 @@ def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)):
     if getattr(payload, "first_name", None) or getattr(payload, "last_name", None):
         name = f"{payload.first_name or ''} {payload.last_name or ''}".strip()
 
-    user = crud.create_user(db, email=payload.email, password=payload.password, role="user", name=name)
+    # Determine role: if no users exist yet and no code provided -> make this user an owner
+    # If no code -> создаём нового владельца с собственной организацией
+    if not code:
+        init_role = "owner"
+    else:
+        init_role = "user"
+    # Determine organization_id
+    org_id = None
+    if init_role == "owner":
+        # create organization for this owner
+        org_id = crud.generate_id()
+        try:
+            db.execute(_text("INSERT INTO organizations (id, name) VALUES (:id, :name)"), {"id": org_id, "name": name or payload.email})
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to create organization")
+    else:
+        # get inviter's organization via created_by_user_id
+        inv_org = None
+        if code and getattr(code, "created_by_user_id", None):
+            inv_org = db.execute(_text("SELECT organization_id FROM users WHERE id = :id"), {"id": code.created_by_user_id}).scalar()
+        if not inv_org:
+            raise HTTPException(status_code=400, detail="Invalid invite: missing organization")
+        org_id = inv_org
+
+    user = crud.create_user(db, email=payload.email, password=payload.password, role=init_role, name=name)
+    # set organization for user
+    try:
+        db.execute(_text("UPDATE users SET organization_id = :oid WHERE id = :uid"), {"oid": org_id, "uid": user.id})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to assign organization")
+    # Link invited_by_user_id if code has creator
+    try:
+        if code and getattr(code, "created_by_user_id", None):
+            # set invited_by_user_id on user
+            db.execute(_text("UPDATE users SET invited_by_user_id = :by WHERE id = :id"), {"by": code.created_by_user_id, "id": user.id})
+            db.commit()
+    except Exception:
+        db.rollback()
     # Ensure employee record linked to this user
-    crud.ensure_employee_for_user(db, user, getattr(payload, "first_name", None), getattr(payload, "last_name", None))
+    emp = crud.ensure_employee_for_user(db, user, getattr(payload, "first_name", None), getattr(payload, "last_name", None))
+    # set organization for employee
+    try:
+        db.execute(_text("UPDATE employees SET organization_id = :oid WHERE id = :eid"), {"oid": org_id, "eid": emp.id})
+        db.commit()
+    except Exception:
+        db.rollback()
 
     token = crud.create_session(db, user.id)
     return {"user": crud.serialize_user(user), "token": token}
+
+# --- Invite codes management (owner/admin) ---
+@app.get("/api/invites", response_model=List[schemas.InviteCodeOut])
+def list_invites(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    rows = db.query(models.RegistrationCode).order_by(models.RegistrationCode.created_at.desc()).all()
+    return [{"id": r.id, "code": r.code, "is_active": bool(r.is_active), "created_at": r.created_at} for r in rows]
+
+@app.post("/api/invites", response_model=schemas.InviteCodeOut)
+def create_invite(payload: schemas.InviteCodeCreate, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    # If code provided, ensure unique; otherwise generate
+    code = (payload.code or "").strip()
+    if not code:
+        import secrets, string
+        alphabet = string.ascii_uppercase + string.digits
+        code = "".join(secrets.choice(alphabet) for _ in range(8))
+    existing = db.query(models.RegistrationCode).filter(models.RegistrationCode.code == code).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Code already exists")
+    # Insert first, then set created_by_user_id via UPDATE for backward DBs
+    rc = models.RegistrationCode(code=code, is_active=True)
+    db.add(rc)
+    db.commit()
+    db.refresh(rc)
+    # Try to set created_by_user_id if column exists
+    try:
+        db.execute(_text("UPDATE registration_codes SET created_by_user_id = :uid WHERE id = :rid"), {"uid": user.id, "rid": rc.id})
+        db.commit()
+    except Exception:
+        db.rollback()
+    return {"id": rc.id, "code": rc.code, "is_active": bool(rc.is_active), "created_at": rc.created_at}
+
+@app.put("/api/invites/{invite_id}/deactivate", response_model=schemas.InviteCodeOut)
+def deactivate_invite(invite_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    rc = db.query(models.RegistrationCode).filter(models.RegistrationCode.id == invite_id).first()
+    if not rc:
+        raise HTTPException(status_code=404, detail="Not found")
+    rc.is_active = False
+    db.commit()
+    db.refresh(rc)
+    return {"id": rc.id, "code": rc.code, "is_active": bool(rc.is_active), "created_at": rc.created_at}
 
 @app.post("/api/auth/login", response_model=schemas.AuthResponse)
 def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
@@ -249,15 +368,31 @@ def get_employees(db: Session = Depends(get_db), authorization: Optional[str] = 
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
         user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
+        if user:
+            # Owners/admins: вся организация
+            if user.role in ("owner", "admin"):
+                return db.query(models.Employee).filter(models.Employee.organization_id == user.organization_id).all()
+            # Обычный пользователь: только собственная карточка
             emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
             return [emp] if emp else []
-    return crud.get_employees(db)
+    # Без авторизации: пусто
+    return []
 
 @app.get("/api/employees/{employee_id}", response_model=schemas.Employee)
-def get_employee(employee_id: str, db: Session = Depends(get_db)):
+def get_employee(employee_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
     employee = crud.get_employee(db, employee_id)
-    if not employee:
+    if not employee or not user:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if user.role in ("owner", "admin"):
+        if employee.organization_id != user.organization_id:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        return employee
+    # Regular user: only own employee card
+    if employee.user_id != user.id:
         raise HTTPException(status_code=404, detail="Employee not found")
     return employee
 
@@ -269,7 +404,18 @@ def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_
         user = crud.get_user_by_token(db, token)
         if user and user.role not in ("owner", "admin"):
             raise HTTPException(status_code=403, detail="Forbidden")
-    return crud.create_employee(db, employee)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    emp = crud.create_employee(db, employee)
+    # assign organization
+    from sqlalchemy import text as _t
+    db.execute(_t("UPDATE employees SET organization_id = :oid WHERE id = :id"), {"oid": user.organization_id, "id": emp.id})
+    db.commit()
+    return emp
 
 @app.put("/api/employees/{employee_id}", response_model=schemas.Employee)
 def update_employee(employee_id: str, employee: schemas.EmployeeUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
@@ -309,18 +455,36 @@ def delete_employee(employee_id: str, db: Session = Depends(get_db), authorizati
 # Project endpoints
 @app.get("/api/projects", response_model=List[schemas.Project])
 def get_projects(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    # If auth provided, scope for non-admin users
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
         user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
+        if user:
+            if user.role in ("owner", "admin"):
+                return db.query(models.Project).filter(models.Project.organization_id == user.organization_id).all()
             return crud.list_projects_for_user(db, user)
-    return crud.get_projects(db)
+    return []
 
 @app.get("/api/projects/{project_id}", response_model=schemas.Project)
-def get_project(project_id: str, db: Session = Depends(get_db)):
+def get_project(project_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
     project = crud.get_project(db, project_id)
-    if not project:
+    if not project or not user:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if user.role in ("owner", "admin"):
+        if project.organization_id != user.organization_id:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return project
+    # Regular user: must be a member and same org
+    emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.organization_id != emp.organization_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    is_member = any(m.employee_id == emp.id for m in project.members)
+    if not is_member:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
@@ -332,7 +496,19 @@ def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)
         user = crud.get_user_by_token(db, token)
         if user and user.role not in ("owner", "admin"):
             raise HTTPException(status_code=403, detail="Forbidden")
-    return crud.create_project(db, project)
+    # set tenant
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    pr = crud.create_project(db, project)
+    # assign org
+    from sqlalchemy import text as _t
+    db.execute(_t("UPDATE projects SET organization_id = :oid WHERE id = :id"), {"oid": user.organization_id, "id": pr.id})
+    db.commit()
+    return pr
 
 @app.put("/api/projects/{project_id}", response_model=schemas.Project)
 def update_project(project_id: str, project: schemas.ProjectUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
@@ -418,24 +594,43 @@ def remove_project_link(project_id: str, link_id: str, db: Session = Depends(get
 # Transaction endpoints
 @app.get("/api/transactions", response_model=List[schemas.Transaction])
 def get_transactions(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
-            # скрываем финансы для обычных пользователей
-            return []
-    return crud.get_transactions(db)
+    if not authorization or not authorization.startswith("Bearer "):
+        return []
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        return []
+    if user.role not in ("owner", "admin"):
+        return []
+    return db.query(models.Transaction).filter(models.Transaction.organization_id == user.organization_id).order_by(models.Transaction.date.desc()).all()
 
 @app.get("/api/transactions/{transaction_id}", response_model=schemas.Transaction)
-def get_transaction(transaction_id: str, db: Session = Depends(get_db)):
+def get_transaction(transaction_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     transaction = crud.get_transaction(db, transaction_id)
-    if not transaction:
+    if not transaction or transaction.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return transaction
 
 @app.post("/api/transactions", response_model=schemas.Transaction)
-def create_transaction(transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
-    return crud.create_transaction(db, transaction)
+def create_transaction(transaction: schemas.TransactionCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    tx = crud.create_transaction(db, transaction)
+    # assign organization
+    from sqlalchemy import text as _t
+    db.execute(_t("UPDATE transactions SET organization_id = :oid WHERE id = :id"), {"oid": user.organization_id, "id": tx.id})
+    db.commit()
+    return tx
 
 @app.put("/api/transactions/{transaction_id}", response_model=schemas.Transaction)
 def update_transaction(transaction_id: str, transaction: schemas.TransactionUpdate, db: Session = Depends(get_db)):
@@ -456,14 +651,28 @@ def get_tasks(db: Session = Depends(get_db), authorization: Optional[str] = Head
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
         user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
+        if user:
+            if user.role in ("owner", "admin"):
+                return db.query(models.Task).filter(models.Task.organization_id == user.organization_id).order_by(models.Task.created_at.desc()).all()
             return crud.list_tasks_for_user(db, user)
-    return crud.get_tasks(db)
+    return []
 
 @app.get("/api/tasks/{task_id}", response_model=schemas.Task)
-def get_task(task_id: str, db: Session = Depends(get_db)):
+def get_task(task_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
     task = crud.get_task(db, task_id)
-    if not task:
+    if not task or not user:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if user.role in ("owner", "admin"):
+        if task.organization_id != user.organization_id:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return task
+    # regular user: must be assigned to them
+    emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+    if not emp or task.assigned_to != emp.id:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
@@ -476,6 +685,11 @@ def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db), authori
         if user and user.role not in ("owner", "admin"):
             raise HTTPException(status_code=403, detail="Forbidden")
     created = crud.create_task(db, task)
+    # assign organization
+    from sqlalchemy import text as _t
+    if user:
+        db.execute(_t("UPDATE tasks SET organization_id = :oid WHERE id = :id"), {"oid": user.organization_id, "id": created.id})
+        db.commit()
     # Notify assignee via Telegram if chat linked
     try:
         if created.assigned_to:

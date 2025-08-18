@@ -1,4 +1,5 @@
 import { useAuth } from '@/stores/useAuth'
+import { inviteApi } from '@/lib/api'
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 
@@ -41,6 +42,12 @@ export function AccountPage() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
+  // Invites state (owner/admin only)
+  type Invite = { id: number; code: string; is_active: boolean; created_at: string }
+  const [invites, setInvites] = useState<Invite[]>([])
+  const [invitesLoading, setInvitesLoading] = useState(false)
+  const isOwnerOrAdmin = !!user && (user.role === 'owner' || user.role === 'admin')
+
   useEffect(() => {
     setName(user?.name || '')
     setProfile({
@@ -55,6 +62,38 @@ export function AccountPage() {
   openrouter_api_key: '',
     })
   }, [user])
+
+  useEffect(() => {
+    if (!isOwnerOrAdmin) return
+    void loadInvites()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOwnerOrAdmin])
+
+  async function loadInvites() {
+    try {
+      setInvitesLoading(true)
+      const list = await inviteApi.list() as any as Invite[]
+      setInvites(list)
+    } catch (e) {
+      // noop
+    } finally {
+      setInvitesLoading(false)
+    }
+  }
+
+  async function onCreateInvite() {
+    try {
+      const created = await inviteApi.create() as any as Invite
+      setInvites((prev) => [created, ...prev])
+    } catch {}
+  }
+
+  async function onDeactivateInvite(id: number) {
+    try {
+      const updated = await inviteApi.deactivate(id) as any as Invite
+      setInvites((prev) => prev.map(i => i.id === id ? updated : i))
+    } catch {}
+  }
 
   if (!user) {
     navigate('/login')
@@ -312,6 +351,69 @@ export function AccountPage() {
               <button className="h-9 px-4 rounded border text-sm" onClick={onChangePassword}>Обновить пароль</button>
             </div>
           </div>
+
+          {isOwnerOrAdmin && (
+            <div className="p-4 border rounded space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="font-medium text-sm">Коды приглашения</div>
+                <button
+                  className="h-8 px-3 rounded border text-xs"
+                  onClick={onCreateInvite}
+                  disabled={invitesLoading}
+                >{invitesLoading ? 'Создание…' : 'Создать код'}</button>
+              </div>
+              <div className="text-xs text-muted-foreground">Поделитесь кодом с сотрудником — он сможет зарегистрироваться.
+                Первый зарегистрированный пользователь автоматически получает роль владельца (owner).
+              </div>
+              <div className="border rounded">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left p-2">Код</th>
+                      <th className="text-left p-2">Статус</th>
+                      <th className="text-left p-2">Создан</th>
+                      <th className="p-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invites.length === 0 && (
+                      <tr>
+                        <td className="p-3 text-sm text-muted-foreground" colSpan={4}>Кодов пока нет</td>
+                      </tr>
+                    )}
+                    {invites.map((i) => (
+                      <tr key={i.id} className="border-b last:border-b-0">
+                        <td className="p-2 font-mono">
+                          <div className="flex items-center gap-2">
+                            <span>{i.code}</span>
+                            <button
+                              className="h-7 px-2 rounded border text-xs"
+                              title="Копировать"
+                              onClick={() => navigator.clipboard?.writeText(i.code)}
+                            >Копировать</button>
+                          </div>
+                        </td>
+                        <td className="p-2">
+                          {i.is_active ? <span className="text-green-600">активен</span> : <span className="text-muted-foreground">деактивирован</span>}
+                        </td>
+                        <td className="p-2 text-muted-foreground">
+                          {new Date(i.created_at).toLocaleString()}
+                        </td>
+                        <td className="p-2 text-right">
+                          {i.is_active && (
+                            <button
+                              className="h-8 px-3 rounded border text-xs"
+                              onClick={() => onDeactivateInvite(i.id)}
+                            >Деактивировать</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end pb-6">
             <button

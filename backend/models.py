@@ -5,6 +5,13 @@ from database import Base
 from typing import List
 from uuid import uuid4
 
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class Employee(Base):
     __tablename__ = "employees"
     
@@ -28,6 +35,8 @@ class Employee(Base):
     bill_hourly_rate = Column(Integer, nullable=True)  # сколько берем с клиента за час
     # Link to app user (optional, unique per user)
     user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=True)
+    # Tenant scoping
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     
     # Relationships
     transactions = relationship("Transaction", back_populates="employee")
@@ -51,6 +60,8 @@ class Project(Base):
     end_date = Column(Date, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Tenant scoping
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     
     # Relationships
     links = relationship("ProjectLink", back_populates="project", cascade="all, delete-orphan")
@@ -106,6 +117,8 @@ class Transaction(Base):
     task_id = Column(String, ForeignKey("tasks.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Tenant scoping
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     
     # Relationships
     employee = relationship("Employee", back_populates="transactions")
@@ -142,6 +155,8 @@ class Task(Base):
     # Link created finance transactions
     income_tx_id = Column(String, nullable=True)
     expense_tx_id = Column(String, nullable=True)
+    # Tenant scoping
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     
     # Relationships
     assigned_employee = relationship("Employee", back_populates="tasks")
@@ -210,6 +225,8 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Tenant scoping
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
 
     profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
@@ -239,6 +256,8 @@ class RegistrationCode(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String, unique=True, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    # кто создал код (владелец/админ)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Session(Base):
@@ -247,6 +266,13 @@ class Session(Base):
     token = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+
+# Доп: привязка, кто пригласил пользователя (для исторической связи)
+from sqlalchemy import ForeignKey as _FK
+setattr(__import__(__name__), 'User_invited_by_marker', True)
+
+class _UserInviteMixin:
+    invited_by_user_id = Column(String, _FK("users.id"), nullable=True)
 
 # --- Chat models ---
 class ChatSession(Base):

@@ -289,7 +289,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     confirm_password: str
-    code: str
+    code: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
 
@@ -348,6 +348,16 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str
+
+# --- Invite codes ---
+class InviteCodeOut(BaseModel):
+    id: int
+    code: str
+    is_active: bool
+    created_at: datetime
+
+class InviteCodeCreate(BaseModel):
+    code: str | None = None
 
 # --- AI command schemas ---
 class AICommandRequest(BaseModel):

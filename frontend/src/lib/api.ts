@@ -1,11 +1,5 @@
-// Resolve base API URL:
-// - PROD: use VITE_API_URL if set, otherwise relative "/api" (works when Nginx proxies /api -> backend)
-// - DEV: default to http://localhost:8000 to match local backend
-const __ENV__ = (typeof import.meta !== 'undefined' ? (import.meta as any).env : {}) || {}
-const __DEV__ = !!__ENV__.DEV
-const __VITE_API__ = (__ENV__.VITE_API_URL || '').toString()
-const __BASE__ = __VITE_API__ || (__DEV__ ? 'http://localhost:8000' : '')
-const API_BASE_URL = `${__BASE__.replace(/\/+$/, '')}/api`
+const API_BASE_URL = 'http://localhost:8000/api'
+const __DEV__ = typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.DEV
 
 // Generic API functions
 export async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -215,9 +209,9 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   }),
-  register: (p: { email: string, password: string, confirmPassword: string, code: string, firstName?: string, lastName?: string }) => apiRequest('/auth/register', {
+  register: (p: { email: string, password: string, confirmPassword: string, code?: string, firstName?: string, lastName?: string }) => apiRequest('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email: p.email, password: p.password, confirm_password: p.confirmPassword, code: p.code, first_name: p.firstName, last_name: p.lastName }),
+    body: JSON.stringify({ email: p.email, password: p.password, confirm_password: p.confirmPassword, ...(p.code ? { code: p.code } : {}), first_name: p.firstName, last_name: p.lastName }),
   }),
   me: () => apiRequest('/auth/me'),
   updateProfile: (data: { name?: string }) => apiRequest('/auth/profile', {
@@ -239,4 +233,11 @@ export const chatApi = {
   remove: (id: string) => apiRequest(`/chat/sessions/${id}`, { method: 'DELETE' }),
   messages: (id: string) => apiRequest(`/chat/sessions/${id}/messages`),
   clear: (id: string) => apiRequest(`/chat/sessions/${id}/messages`, { method: 'DELETE' }),
+}
+
+// Invite codes API (owner/admin)
+export const inviteApi = {
+  list: () => apiRequest('/invites'),
+  create: (code?: string) => apiRequest('/invites', { method: 'POST', body: JSON.stringify({ code }) }),
+  deactivate: (id: number) => apiRequest(`/invites/${id}/deactivate`, { method: 'PUT' }),
 }
