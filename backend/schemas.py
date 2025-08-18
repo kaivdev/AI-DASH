@@ -288,10 +288,15 @@ class ProjectLinkAdd(BaseModel):
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    confirm_password: str
+    # Accept both snake_case and camelCase from frontend (confirm_password or confirmPassword)
+    confirm_password: str = Field(..., alias="confirmPassword")
     code: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    # Accept both naming styles for convenience
+    first_name: Optional[str] = Field(None, alias="firstName")
+    last_name: Optional[str] = Field(None, alias="lastName")
+
+    # pydantic v2: allow population by field name in addition to alias
+    model_config = {"populate_by_name": True}
 
 class LoginRequest(BaseModel):
     email: EmailStr
