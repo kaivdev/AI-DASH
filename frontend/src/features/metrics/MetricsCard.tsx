@@ -55,7 +55,7 @@ export function MetricsCard() {
   }, [notes, tasks, txs])
 
   return (
-    <ModuleCard id="metrics" title="Metrics / Snapshot" size="1x1">
+    <ModuleCard id="metrics" title="Metrics / Snapshot" size="2x2">
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-4 text-center">
           <div>

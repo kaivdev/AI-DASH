@@ -17,7 +17,7 @@ export const useSettings = create<SettingsState>()(
       setGridRowHeight: (px) => set({ gridRowHeight: Math.max(140, Math.min(480, Math.round(px))) }),
       theme: 'dark',
       setTheme: (t) => set({ theme: t }),
-      autoAlign: true,
+  autoAlign: false,
       setAutoAlign: (v) => set({ autoAlign: !!v }),
     }),
     { name: 'ai-life-settings' }

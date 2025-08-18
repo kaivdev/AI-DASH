@@ -39,7 +39,7 @@ interface ModulesState {
 }
 
 function defaultSizeFor(key: ModuleKey): EnabledModule['size'] {
-  if (key === 'finance' || key === 'employees' || key === 'projects' || key === 'goals' || key === 'reading') return '2x2'
+  if (key === 'finance' || key === 'employees' || key === 'projects' || key === 'goals' || key === 'reading' || key === 'metrics') return '2x2'
   if (key === 'notes' || key === 'tasks') return '2x1'
   return '1x1'
 }
@@ -53,14 +53,15 @@ export const useModules = create<ModulesState>()(
   persist(
     (set, get) => ({
       enabled: [
-        { key: 'metrics', size: '1x1', order: 0, rowSpan: 1 },
-        { key: 'finance', size: '2x2', order: 1, rowSpan: 2 },
-        { key: 'employees', size: '2x2', order: 2, rowSpan: 2 },
-        { key: 'projects', size: '2x2', order: 3, rowSpan: 2 },
-        { key: 'tasks', size: '2x2', order: 4, rowSpan: 2 },
-        { key: 'goals', size: '2x2', order: 5, rowSpan: 2 },
-        { key: 'reading', size: '2x2', order: 6, rowSpan: 2 },
-        { key: 'notes', size: '2x1', order: 7, rowSpan: 1 }
+        // Новый дефолтный порядок: задачи, проекты, финансы, сотрудники, цели, ридинг лист, заметки, метрики
+        { key: 'tasks', size: '2x2', order: 0, rowSpan: 2 },
+        { key: 'projects', size: '2x2', order: 1, rowSpan: 2 },
+        { key: 'finance', size: '2x2', order: 2, rowSpan: 2 },
+        { key: 'employees', size: '2x2', order: 3, rowSpan: 2 },
+        { key: 'goals', size: '2x2', order: 4, rowSpan: 2 },
+  { key: 'reading', size: '2x2', order: 5, rowSpan: 2 },
+  { key: 'notes', size: '2x2', order: 6, rowSpan: 2 },
+        { key: 'metrics', size: '2x2', order: 7, rowSpan: 2 },
       ],
       disabled: [],
       enable: (key) =>
@@ -138,6 +139,63 @@ export const useModules = create<ModulesState>()(
         }),
       setOrder: (list) => set({ enabled: list }),
     }),
-    { name: 'ai-life-modules' }
+    {
+      name: 'ai-life-modules',
+      version: 2,
+      migrate: (persisted: any, fromVersion: number) => {
+        if (!persisted) return persisted
+        if (fromVersion >= 2) return persisted
+
+        // Support both wrapped ({ state, version }) and flat shapes
+        const hasWrapper = persisted && typeof persisted === 'object' && 'state' in persisted && persisted.state
+        const base: any = hasWrapper ? { ...(persisted.state || {}) } : { ...persisted }
+
+        if (!Array.isArray(base.enabled)) return persisted
+
+        const desiredOrder: ModuleKey[] = [
+          'tasks',
+          'projects',
+          'finance',
+          'employees',
+          'goals',
+          'reading',
+          'notes',
+          'metrics',
+        ]
+
+        const byKey = new Map<ModuleKey, EnabledModule>()
+        for (const m of base.enabled as EnabledModule[]) {
+          byKey.set(m.key, m)
+        }
+
+        const result: EnabledModule[] = []
+        // Place desired in fixed order, if present
+          for (const key of desiredOrder) {
+          const m = byKey.get(key)
+          if (!m) continue
+          // Ensure metrics and notes have 2x2 size and rowSpan 2
+          if (key === 'metrics' || key === 'notes') {
+            const size = '2x2'
+            const rowSpan = Math.max(2, m.rowSpan ?? 2)
+            result.push({ ...m, size, rowSpan })
+          } else {
+            result.push(m)
+          }
+          byKey.delete(key)
+        }
+        // Append any other remaining modules preserving their relative order
+        const leftovers = (base.enabled as EnabledModule[]).filter((m) => byKey.has(m.key))
+        for (const m of leftovers) result.push(m)
+
+        // Reassign order sequentially
+        const reOrdered = result.map((m, idx) => ({ ...m, order: idx }))
+        base.enabled = reOrdered
+
+        if (hasWrapper) {
+          return { ...persisted, state: base }
+        }
+        return base
+      },
+    }
   )
 ) 

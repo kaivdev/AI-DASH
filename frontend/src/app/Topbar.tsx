@@ -22,8 +22,7 @@ export function Topbar() {
   const [initialQuery, setInitialQuery] = useState<string>('')
   const theme = useSettings((s) => s.theme)
   const setTheme = useSettings((s) => s.setTheme)
-  const autoAlign = useSettings((s) => s.autoAlign)
-  const setAutoAlign = useSettings((s) => s.setAutoAlign)
+  // autoAlign removed from topbar menu - controlled by defaults/migration
   const [menuOpen, setMenuOpen] = useState(false)
 
   const enabled = useModules((s) => s.enabled)
@@ -115,16 +114,7 @@ export function Topbar() {
                 Войти
               </Link>
             )}
-            {user && onDashboard && (
-              <button
-                onClick={() => setAutoAlign(!autoAlign)}
-                className={`w-full text-left rounded border px-3 py-2 text-sm hover:bg-muted/40 ${autoAlign ? 'bg-green-500/10 border-green-500/50' : ''}`}
-                title="Автовыравнивание"
-                aria-pressed={autoAlign}
-              >
-                Автовыравнивание: {autoAlign ? 'Вкл.' : 'Выкл.'}
-              </button>
-            )}
+            {/* autoAlign control removed from menu */}
           </div>
 
           {user && (
