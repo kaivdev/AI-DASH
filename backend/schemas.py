@@ -7,12 +7,15 @@ class EmployeeBase(BaseModel):
     name: str
     position: str
     email: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
     salary: Optional[float] = None
     revenue: Optional[float] = None
     current_status: str
     status_tag: Optional[str] = None
     status_date: date
-    hourly_rate: Optional[int] = None
+    hourly_rate: Optional[int] = None  # legacy
+    cost_hourly_rate: Optional[int] = None
+    bill_hourly_rate: Optional[int] = None
 
 class EmployeeCreate(EmployeeBase):
     pass
@@ -21,12 +24,15 @@ class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
     position: Optional[str] = None
     email: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
     salary: Optional[float] = None
     revenue: Optional[float] = None
     current_status: Optional[str] = None
     status_tag: Optional[str] = None
     status_date: Optional[date] = None
     hourly_rate: Optional[int] = None
+    cost_hourly_rate: Optional[int] = None
+    bill_hourly_rate: Optional[int] = None
 
 class EmployeeStatusUpdate(BaseModel):
     current_status: str
@@ -81,6 +87,9 @@ class Project(ProjectBase):
     links: List[ProjectLink] = []
     member_ids: List[str] = []
     member_rates: dict[str, int | None] = {}
+    # optional detailed rates per member (new)
+    member_cost_rates: dict[str, int | None] = {}
+    member_bill_rates: dict[str, int | None] = {}
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -97,6 +106,7 @@ class TransactionBase(BaseModel):
     tags: List[str] = []
     employee_id: Optional[str] = None
     project_id: Optional[str] = None
+    task_id: Optional[str] = None
 
 class TransactionCreate(TransactionBase):
     pass
@@ -130,6 +140,9 @@ class TaskBase(BaseModel):
     hours_spent: float = 0.0
     billable: bool = True
     hourly_rate_override: Optional[int] = None
+    cost_rate_override: Optional[int] = None
+    bill_rate_override: Optional[int] = None
+    work_status: Optional[str] = None  # in_progress, paused
 
 class TaskCreate(TaskBase):
     pass
@@ -144,12 +157,23 @@ class TaskUpdate(BaseModel):
     hours_spent: Optional[float] = None
     billable: Optional[bool] = None
     hourly_rate_override: Optional[int] = None
+    cost_rate_override: Optional[int] = None
+    bill_rate_override: Optional[int] = None
+    work_status: Optional[str] = None
+    approved: Optional[bool] = None
 
 class Task(TaskBase):
     id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
     applied_hourly_rate: Optional[int] = None
+    applied_cost_rate: Optional[int] = None
+    applied_bill_rate: Optional[int] = None
+    approved: Optional[bool] = None
+    approved_at: Optional[datetime] = None
+    work_status: Optional[str] = None
+    income_tx_id: Optional[str] = None
+    expense_tx_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -228,6 +252,7 @@ class NoteBase(BaseModel):
     title: Optional[str] = None
     content: str
     tags: List[str] = []
+    shared: bool = False
 
 class NoteCreate(NoteBase):
     pass
@@ -237,6 +262,7 @@ class NoteUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     tags: Optional[List[str]] = None
+    shared: Optional[bool] = None
 
 class Note(NoteBase):
     id: str
@@ -283,6 +309,8 @@ class UserProfileOut(BaseModel):
     twitter: Optional[str] = None
     timezone: Optional[str] = None
     locale: Optional[str] = None
+    # whether user has configured an OpenRouter key (masked; actual key is never returned)
+    has_openrouter_key: bool = False
 
 class UserOut(BaseModel):
     id: str
@@ -310,6 +338,8 @@ class UserProfileUpdate(BaseModel):
     twitter: Optional[str] = None
     timezone: Optional[str] = None
     locale: Optional[str] = None
+    # Optional: set or clear per-user OpenRouter API key
+    openrouter_api_key: Optional[str] = None
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
@@ -323,6 +353,7 @@ class PasswordChange(BaseModel):
 class AICommandRequest(BaseModel):
     query: str
     user_id: Optional[str] = None
+    chat_id: Optional[str] = None
 
 class AICommandResult(BaseModel):
     summary: str
@@ -331,3 +362,28 @@ class AICommandResult(BaseModel):
 
 class AIChatResponse(BaseModel):
     result: AICommandResult 
+
+# --- Chat session schemas ---
+class ChatMessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ChatSessionOut(BaseModel):
+    id: str
+    title: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class ChatSessionCreate(BaseModel):
+    title: Optional[str] = None
+
+class ChatSessionUpdate(BaseModel):
+    title: Optional[str] = None 

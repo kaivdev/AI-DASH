@@ -1,13 +1,16 @@
 import { ModuleCard } from '@/features/modules/ModuleCard'
 import { useNotes } from '@/stores/useNotes'
+import { useAuth } from '@/stores/useAuth'
 import { useState } from 'react'
 import { Pencil, Trash2, Check, X } from 'lucide-react'
+import { toast } from 'sonner'
 
 export function NotesCard() {
   const notes = useNotes((s) => s.notes)
   const add = useNotes((s) => s.add)
   const update = useNotes((s) => s.update)
   const remove = useNotes((s) => s.remove)
+  const user = useAuth((s) => s.user)
 
   const [content, setContent] = useState('')
   const [editingId, setEditingId] = useState<string>('')
@@ -18,7 +21,7 @@ export function NotesCard() {
     const text = content.trim()
     if (!text) return
     const now = new Date().toISOString()
-    add({ content: text, date: now.slice(0, 10), tags: [], created_at: now })
+  add({ content: text, date: now.slice(0, 10), tags: [] })
     setContent('')
   }
 
@@ -71,13 +74,35 @@ export function NotesCard() {
                 <>
                   {n.title && <div className="font-medium">{n.title}</div>}
                   <div className="text-sm whitespace-pre-wrap">{n.content}</div>
-                  <div className="mt-2 flex items-center justify-end gap-1">
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="text-xs text-muted-foreground">
+                      {n.shared ? 'Поделено со всеми' : 'Личная заметка'}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {user?.role && (user.role === 'owner' || user.role === 'admin') && (
+                        <button
+                          className="h-7 px-2 rounded border text-xs hover:bg-muted/40"
+                          onClick={async () => {
+                            try {
+                              await update(n.id, { shared: !n.shared } as any)
+                              toast.success(n.shared ? 'Сделано личной' : 'Поделено со всеми')
+                            } catch (e) {
+                              toast.error('Недостаточно прав для изменения шаринга')
+                            }
+                          }}
+                          title={n.shared ? 'Сделать личной' : 'Поделиться со всеми'}
+                          aria-label={n.shared ? 'Сделать личной' : 'Поделиться со всеми'}
+                        >
+                          {n.shared ? 'Сделать личной' : 'Поделиться'}
+                        </button>
+                      )}
                     <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={() => startEdit(n)} title="Редактировать" aria-label="Редактировать">
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={() => remove(n.id)} title="Удалить" aria-label="Удалить">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
+                    </div>
                   </div>
                 </>
               )}

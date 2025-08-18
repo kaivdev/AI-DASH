@@ -11,6 +11,8 @@ type Profile = {
   telegram?: string
   github?: string
   locale?: string
+  // client-side only field to send new token; won't be echoed back
+  openrouter_api_key?: string
 }
 
 export function AccountPage() {
@@ -30,10 +32,13 @@ export function AccountPage() {
     telegram: user?.profile?.telegram || '',
     github: user?.profile?.github || '',
     locale: user?.profile?.locale || '',
+  openrouter_api_key: '',
   })
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -47,6 +52,7 @@ export function AccountPage() {
       telegram: user?.profile?.telegram || '',
       github: user?.profile?.github || '',
       locale: user?.profile?.locale || '',
+  openrouter_api_key: '',
     })
   }, [user])
 
@@ -55,18 +61,39 @@ export function AccountPage() {
     return null
   }
 
-  async function onSaveProfile() {
+  async function onSaveProfile(nextProfile?: Profile) {
+    const payloadProfile = nextProfile ?? profile
+    setSaving(true)
+    setSaveMsg(null)
     try {
-      await fetch('http://localhost:8000/api/auth/profile', {
+      const resp = await fetch('http://localhost:8000/api/auth/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ name, profile }),
+        body: JSON.stringify({ name, profile: payloadProfile }),
       })
+      if (!resp.ok) throw new Error('save failed')
+      // Refresh user to get has_openrouter_key flag
       await me()
-    } catch {}
+      // Clear sensitive field in UI state
+      setProfile(p => ({ ...p, openrouter_api_key: '' }))
+      setSaveMsg('Сохранено')
+    } catch {
+      setSaveMsg('Ошибка сохранения')
+    } finally {
+      setSaving(false)
+      // Auto-hide message
+      setTimeout(() => setSaveMsg(null), 3000)
+    }
+  }
+
+  async function onClearToken() {
+    // Persist token removal immediately
+    const nextP = { ...profile, openrouter_api_key: '' }
+    setProfile(nextP)
+    await onSaveProfile(nextP)
   }
 
   async function onChangePassword() {
@@ -149,6 +176,33 @@ export function AccountPage() {
               />
             </div>
             <div>
+              <label className="text-xs mb-1 block">OpenRouter API Key</label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="password"
+                  value={profile.openrouter_api_key || ''}
+                  onChange={(e) => setProfile(p => ({ ...p, openrouter_api_key: e.target.value }))}
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                  placeholder={user?.profile && (user.profile as any).has_openrouter_key ? '•••••••••••••••• (настроен)' : 'Введите токен OpenRouter'}
+                />
+                {user?.profile && (user.profile as any).has_openrouter_key && (
+                  <button
+                    type="button"
+                    className="h-9 px-3 rounded border text-xs whitespace-nowrap"
+                    title="Очистить сохранённый токен"
+                    onClick={onClearToken}
+                  >Очистить</button>
+                )}
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-1">Токен хранится на сервере и используется только для ваших запросов. Мы не показываем его обратно.</div>
+              {saveMsg && (
+                <div className={`mt-1 text-[12px] ${saveMsg === 'Сохранено' ? 'text-green-600' : 'text-red-600'}`}>{saveMsg}</div>
+              )}
+              {user?.profile && (user.profile as any).has_openrouter_key && !saveMsg && (
+                <div className="mt-1 text-[12px] text-green-600">Токен сохранён</div>
+              )}
+            </div>
+            <div>
               <label className="text-xs mb-1 block">Био</label>
               <textarea
                 value={profile.bio || ''}
@@ -220,12 +274,13 @@ export function AccountPage() {
                     telegram: user?.profile?.telegram || '',
                     github: user?.profile?.github || '',
                     locale: user?.profile?.locale || '',
+                    openrouter_api_key: '',
                   })
                 }}
               >
                 Сбросить
               </button>
-              <button className="h-9 px-4 rounded border text-sm" onClick={onSaveProfile}>Сохранить</button>
+              <button className="h-9 px-4 rounded border text-sm" disabled={saving} onClick={() => onSaveProfile()}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
             </div>
           </div>
 

@@ -7,12 +7,12 @@ import { useMemo, useState, useEffect } from 'react'
 import type { Task, Priority } from '@/types/core'
 import { ConfirmDialog } from '@/app/ConfirmDialog'
 import { TaskDetailDialog } from './TaskDetailDialog'
-import { TaskBoardDialog } from './TaskBoardDialog'
-import { Pencil, Trash2, Plus, X } from 'lucide-react'
+import { Pencil, Trash2, Plus, X, Kanban, Play, Pause } from 'lucide-react'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useAuth } from '@/stores/useAuth'
+import { Link } from 'react-router-dom'
 
 const priorityColors: Record<Priority, string> = {
   L: 'border-green-300 dark:border-green-500/50 shadow-[0_0_0_1px_rgba(34,197,94,0.15)]',
@@ -47,19 +47,38 @@ function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpe
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
   
   return (
-    <div className={`p-3 rounded border-l-4 border-r-4 ${priorityColors[task.priority]} ${task.done ? 'opacity-60' : ''}`}>
+  <div className={`p-3 rounded border-l-4 border-r-4 ${priorityColors[task.priority]} ${task.done && task.approved !== false ? 'opacity-60' : ''}`}>
       <div className="flex items-start gap-3">
-        <Checkbox checked={task.done} onCheckedChange={() => onToggle(task.id)} className="mt-0.5" />
+        <Checkbox
+          checked={task.done && task.approved !== false}
+          onCheckedChange={() => onToggle(task.id)}
+          className="mt-0.5"
+        />
         <div className="flex-1">
           <button
-            className={`text-left w-full ${task.done ? 'line-through text-muted-foreground' : ''}`}
+      className={`text-left w-full ${task.done && task.approved !== false ? 'line-through text-muted-foreground' : ''}`}
             onClick={() => onOpen(task)}
           >
             {task.content}
           </button>
           <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground">
-            {task.done && !task.approved && (
+            {task.done && task.approved === false && (
               <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" title="Ожидает подтверждения"></span>
+            )}
+            {!task.done && (
+              task.work_status === 'in_progress' ? (
+                <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20 inline-flex items-center gap-1">
+                  <Play className="h-3 w-3" /> В работе
+                </span>
+              ) : task.work_status === 'paused' ? (
+                <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-200 dark:ring-1 dark:ring-yellow-500/20 inline-flex items-center gap-1">
+                  <Pause className="h-3 w-3" /> На паузе
+                </span>
+              ) : (
+                <span className="px-2 py-1 rounded bg-gray-100 text-gray-800 dark:bg-gray-500/10 dark:text-gray-300 dark:ring-1 dark:ring-gray-500/20 inline-flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 rounded-full bg-slate-400" /> Открытая
+                </span>
+              )
             )}
             <span className="px-2 py-1 rounded bg-gray-100 text-gray-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20">
               {priorityLabels[task.priority]}
@@ -69,7 +88,7 @@ function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpe
             </span>
             {isAdmin && task.billable && (
               <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20">
-                ₽/ч {task.applied_hourly_rate ?? task.hourly_rate_override ?? '—'}
+                ₽/ч {(task as any).applied_bill_rate ?? (task as any).bill_rate_override ?? '—'}
               </span>
             )}
             {task.due_date && (
@@ -147,9 +166,6 @@ export function TasksCard() {
 
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailTask, setDetailTask] = useState<Task | null>(null)
-  const [headerDetailOpen, setHeaderDetailOpen] = useState(false)
-  const [boardInitialProjectId, setBoardInitialProjectId] = useState<string>('')
-  const [boardInitialStatus, setBoardInitialStatus] = useState<'active'|'done'|'all'>('all')
 
   // Load data on mount
   useEffect(() => {
@@ -157,31 +173,30 @@ export function TasksCard() {
     fetchEmployees()
   }, [fetchTasks, fetchEmployees])
 
-  // Open TaskBoardDialog by header title click (with optional filters)
+  // Refresh tasks when tab becomes active (reflect changes from other users)
   useEffect(() => {
-    function onTitleClick(e: any) {
-      if (e?.detail?.id === 'tasks') {
-        const pid = e?.detail?.filterProjectId || ''
-        const st = e?.detail?.filterStatus || 'all'
-        setBoardInitialProjectId(pid)
-        setBoardInitialStatus(st)
-        setHeaderDetailOpen(true)
-      }
-    }
-    window.addEventListener('module-title-click', onTitleClick as any)
-    return () => window.removeEventListener('module-title-click', onTitleClick as any)
-  }, [])
+    const onVis = () => { if (document.visibilityState === 'visible') fetchTasks(true) }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [fetchTasks])
+
+  // Periodic refresh to keep statuses current
+  useEffect(() => {
+    const id = setInterval(() => { fetchTasks(true) }, 30000)
+    return () => clearInterval(id)
+  }, [fetchTasks])
 
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees])
   const projectsById = useMemo(() => Object.fromEntries(projects.map(p => [p.id, p])), [projects])
 
   // Group tasks into sections
-  const { overdue, todayList, tomorrowList, future, noDue, completed } = useMemo(() => {
+  const { overdue, todayList, tomorrowList, future, noDue, awaiting, completed } = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10)
     const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 
-    const active = tasks.filter(t => !t.done)
-    const completed = tasks.filter(t => t.done).slice().sort((a, b) => {
+  const awaiting = tasks.filter(t => t.done && t.approved === false)
+  const active = tasks.filter(t => !t.done)
+  const completed = tasks.filter(t => t.done && t.approved !== false).slice().sort((a, b) => {
       const aTime = new Date(a.updated_at || a.created_at || '').getTime()
       const bTime = new Date(b.updated_at || b.created_at || '').getTime()
       return bTime - aTime
@@ -206,7 +221,7 @@ export function TasksCard() {
     future.sort(byPriorityThenDue)
     noDue.sort((a,b)=> (priorityWeight as any)[b.priority] - (priorityWeight as any)[a.priority])
 
-    return { overdue, todayList, tomorrowList, future, noDue, completed }
+    return { overdue, todayList, tomorrowList, future, noDue, awaiting, completed }
   }, [tasks])
 
   function onStartEdit(task: Task) {
@@ -249,25 +264,36 @@ export function TasksCard() {
       title="Задачи"
       size="2x2"
       headerActions={
-        <button
-          className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
-          onClick={() => {
-            setShowForm((prev) => {
-              const next = !prev
-              if (next) {
-                setEditingTask(null)
-                setContent('')
-                setPriority('M')
-                setDue('')
-                setAssignedTo('')
-                setProjectId('')
-              }
-              return next
-            })
-          }}
-        >
-          {showForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
-        </button>
+        <div className="flex items-center gap-2">
+          <Link 
+            to="/kanban"
+            className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
+          >
+            <Kanban className="h-4 w-4" />
+            Kanban
+          </Link>
+          {isAdmin && (
+            <button
+              className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
+              onClick={() => {
+                setShowForm((prev) => {
+                  const next = !prev
+                  if (next) {
+                    setEditingTask(null)
+                    setContent('')
+                    setPriority('M')
+                    setDue('')
+                    setAssignedTo('')
+                    setProjectId('')
+                  }
+                  return next
+                })
+              }}
+            >
+              {showForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+            </button>
+          )}
+        </div>
       }
     >
       <div className="flex flex-col gap-4 h-full min-h-0">
@@ -296,24 +322,9 @@ export function TasksCard() {
           employees={employees}
           projects={projects}
           onClose={() => setDetailOpen(false)}
-          onEdit={async (t) => { try { await update(t.id, { content: t.content, priority: t.priority, due_date: t.due_date, assigned_to: t.assigned_to, project_id: t.project_id, hours_spent: t.hours_spent, billable: t.billable, hourly_rate_override: t.hourly_rate_override }); } catch {} }}
+          onEdit={async (t) => { try { await update(t.id, { content: t.content, priority: t.priority, due_date: t.due_date, assigned_to: t.assigned_to, project_id: t.project_id, hours_spent: t.hours_spent, billable: t.billable, cost_rate_override: (t as any).cost_rate_override, bill_rate_override: (t as any).bill_rate_override, work_status: (t as any).work_status }); } catch {} }}
           onToggle={(id) => onToggle(id)}
           onDelete={(id) => { setDetailOpen(false); onDelete(id) }}
-        />
-
-        <TaskBoardDialog
-          open={headerDetailOpen}
-          tasks={tasks}
-          employees={employees}
-          projects={projects}
-          onClose={() => setHeaderDetailOpen(false)}
-          onOpenDetail={(t) => { setDetailTask(t); setDetailOpen(true); }}
-          onStartEdit={(t) => { onStartEdit(t); setHeaderDetailOpen(false) }}
-          onToggle={onToggle}
-          onDelete={onDelete}
-          onAdd={add}
-          initialProjectId={boardInitialProjectId}
-          initialStatus={boardInitialStatus}
         />
 
         {editingTask && (
@@ -400,10 +411,10 @@ export function TasksCard() {
                   const rateStr = (document.getElementById('quick-rate') as HTMLInputElement)?.value
                   const billable = (document.getElementById('quick-billable') as HTMLInputElement)?.checked ?? true
                   if (editingTask) {
-                    await update(editingTask.id, { content: isAdmin ? content.trim() : undefined as any, priority: isAdmin ? priority : undefined as any, due_date: isAdmin ? (due || undefined) : undefined as any, assigned_to: isAdmin ? (assignedTo || undefined) : undefined as any, project_id: isAdmin ? (projectId || undefined) : undefined as any, hours_spent: hours, hourly_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable: isAdmin ? billable : undefined as any })
+                    await update(editingTask.id, { content: isAdmin ? content.trim() : undefined as any, priority: isAdmin ? priority : undefined as any, due_date: isAdmin ? (due || undefined) : undefined as any, assigned_to: isAdmin ? (assignedTo || undefined) : undefined as any, project_id: isAdmin ? (projectId || undefined) : undefined as any, hours_spent: hours, cost_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable: isAdmin ? billable : undefined as any })
                     setEditingTask(null)
                   } else {
-                    await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, hourly_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable, created_at: undefined as any, updated_at: undefined as any } as any)
+                    await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, cost_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable, created_at: undefined as any, updated_at: undefined as any } as any)
                   }
                   setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); (document.getElementById('quick-hours') as HTMLInputElement).value='0'; const rateEl=document.getElementById('quick-rate') as HTMLInputElement | null; if(rateEl) rateEl.value=''; (document.getElementById('quick-billable') as HTMLInputElement).checked=true; setShowForm(false)
                 }}>{isAdmin ? 'Сохранить' : 'Списать часы'}</button>
@@ -415,6 +426,28 @@ export function TasksCard() {
 
         <div className="min-h-0 flex-1 overflow-auto relative">
           <div className="space-y-6">
+            {/* Ожидают подтверждения */}
+            {awaiting.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2 text-amber-600">Ожидают подтверждения ({awaiting.length})</h4>
+                <div className="space-y-2">
+                  {awaiting.map(t => (
+                    <TaskItem
+                      key={t.id}
+                      task={t}
+                      employees={employees}
+                      projects={projects}
+                      onToggle={onToggle}
+                      onDelete={(id) => { setPendingDeleteId(id); setConfirmOpen(true) }}
+                      onEdit={onStartEdit}
+                      onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }}
+                      isAdmin={isAdmin}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {overdue.length > 0 && (
               <div>
                 <h4 className="text-sm font-medium mb-2 text-red-600">Истекшие ({overdue.length})</h4>

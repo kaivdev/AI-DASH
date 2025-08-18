@@ -7,6 +7,7 @@ import { Pencil, Save, Trash2, Plus, X as CloseIcon, Check } from 'lucide-react'
 import { useTasks } from '@/stores/useTasks'
 import { useFinance } from '@/stores/useFinance'
 import { ConfirmDialog } from '@/app/ConfirmDialog'
+import { useProjects } from '@/stores/useProjects'
 
 interface ProjectDetailDrawerProps {
   open: boolean
@@ -16,13 +17,13 @@ interface ProjectDetailDrawerProps {
   onEdit: (id: string, patch: Partial<Omit<Project, 'id' | 'created_at' | 'updated_at'>>) => void | Promise<void>
   onRemove: (id: string) => void | Promise<void>
   onAddMember: (projectId: string, employeeId: string) => void | Promise<void>
-     onRemoveMember: (projectId: string, employeeId: string) => void | Promise<void>
-   onSetMemberRate?: (projectId: string, employeeId: string, rate: number | null) => void | Promise<void>
+    onRemoveMember: (projectId: string, employeeId: string) => void | Promise<void>
   onAddLink: (projectId: string, link: Omit<ProjectLink, 'id' | 'project_id' | 'created_at'>) => void | Promise<void>
   onRemoveLink: (projectId: string, linkId: string) => void | Promise<void>
+  isAdmin?: boolean
 }
 
-export function ProjectDetailDrawer({ open, project, employees, onClose, onEdit, onRemove, onAddMember, onRemoveMember, onAddLink, onRemoveLink, onSetMemberRate }: ProjectDetailDrawerProps) {
+  export function ProjectDetailDrawer({ open, project, employees, onClose, onEdit, onRemove, onAddMember, onRemoveMember, onAddLink, onRemoveLink, isAdmin }: ProjectDetailDrawerProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -40,6 +41,7 @@ export function ProjectDetailDrawer({ open, project, employees, onClose, onEdit,
   const fetchFinance = useFinance((s) => s.fetch)
   const [confirmFinishOpen, setConfirmFinishOpen] = useState(false)
   const [finPeriod, setFinPeriod] = useState<'7'|'30'|'90'|'all'>('7')
+  const setMemberRates = useProjects((s)=> (s as any).setMemberRates)
 
   useEffect(() => {
     if (project) {
@@ -138,12 +140,27 @@ export function ProjectDetailDrawer({ open, project, employees, onClose, onEdit,
                {p.member_ids.map(id => {
                  const emp = employees.find(e => e.id === id)
                  if (!emp) return null
-                 const rate = (p as any).member_rates?.[id] ?? null
+         const rate = (p as any).member_bill_rates?.[id] ?? (p as any).member_rates?.[id] ?? null
+         const cost = (p as any).member_cost_rates?.[id] ?? null
                  return (
                    <div key={id} className="flex items-center gap-2 px-2 py-1 bg-blue-50 dark:bg-blue-500/10 dark:text-blue-200 dark:ring-1 dark:ring-blue-500/20 rounded text-xs">
                      <span className="min-w-[140px]">{emp.name}</span>
-                     <input id={`rate-${id}`} className="h-7 px-2 rounded border bg-background text-xs w-24" placeholder="₽/ч" defaultValue={rate ?? ''} />
-                     <button className="h-7 w-7 rounded border inline-flex items-center justify-center" title="Применить" aria-label="Применить" onClick={()=>{ const el=document.getElementById(`rate-${id}`) as HTMLInputElement|null; const v=el?.value; onSetMemberRate && onSetMemberRate(p.id, id, v?Number(v):null) }}><Check className="h-3.5 w-3.5" /></button>
+          {isAdmin ? (
+            <>
+              <span className="text-muted-foreground">Себест.:</span>
+              <input id={`ratec-${id}`} className="h-7 px-2 rounded border bg-background text-xs w-24" placeholder="₽/ч" defaultValue={cost ?? ''} />
+              <span className="text-muted-foreground">Биллин.:</span>
+              <input id={`rateb-${id}`} className="h-7 px-2 rounded border bg-background text-xs w-24" placeholder="₽/ч" defaultValue={rate ?? ''} />
+              <button className="h-7 w-7 rounded border inline-flex items-center justify-center" title="Применить" aria-label="Применить" onClick={async ()=>{ const ec=document.getElementById(`ratec-${id}`) as HTMLInputElement|null; const eb=document.getElementById(`rateb-${id}`) as HTMLInputElement|null; const vc=ec?.value; const vb=eb?.value; try { await setMemberRates?.(p.id, id, { cost_hourly_rate: vc?Number(vc):null, bill_hourly_rate: vb?Number(vb):null }); } catch {} }}><Check className="h-3.5 w-3.5" /></button>
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground">Себест.:</span>
+              <span>{typeof cost === 'number' ? `${cost} ₽/ч` : '—'}</span>
+              <span className="text-muted-foreground">Биллин.:</span>
+              <span>{typeof rate === 'number' ? `${rate} ₽/ч` : '—'}</span>
+            </>
+          )}
                      <button className="text-red-600 dark:text-red-300 hover:text-red-800 ml-auto" onClick={() => onRemoveMember(p.id, id)} title="Убрать">×</button>
                    </div>
                  )
@@ -164,7 +181,7 @@ export function ProjectDetailDrawer({ open, project, employees, onClose, onEdit,
                  const open = memberTasks.filter(t=>!t.done).length
                  const done = memberTasks.filter(t=>t.done).length
                  const hours = memberTasks.reduce((s,t)=> s + (t.hours_spent||0), 0)
-                 const money = memberTasks.filter(t=>t.billable).reduce((s,t)=> s + ((t.applied_hourly_rate ?? t.hourly_rate_override ?? 0) * (t.hours_spent||0)), 0)
+                 const money = memberTasks.filter(t=>t.billable).reduce((s,t)=> s + ((((t as any).applied_bill_rate ?? (t as any).bill_rate_override) ?? 0) * (t.hours_spent||0)), 0)
                  const emp = employees.find(e=>e.id===id)
                  return (
                    <div key={id} className="flex items-center justify-between">

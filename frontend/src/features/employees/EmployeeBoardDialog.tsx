@@ -11,9 +11,10 @@ interface EmployeeBoardDialogProps {
   onAdd: (e: Omit<Employee, 'id' | 'created_at' | 'updated_at'>) => Promise<void> | void
   onRemove: (id: string) => void
   onUpdateStatus: (id: string, status: string, tag?: string) => Promise<void> | void
+  isAdmin?: boolean
 }
 
-export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove, onUpdateStatus }: EmployeeBoardDialogProps) {
+export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove, onUpdateStatus, isAdmin }: EmployeeBoardDialogProps) {
   const [show, setShow] = useState(false)
 
   const [name, setName] = useState('')
@@ -35,7 +36,9 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
       setShow(true)
       const prev = document.body.style.overflow
       document.body.style.overflow = 'hidden'
-      return () => { document.body.style.overflow = prev }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+  document.addEventListener('keydown', onKey)
+  return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey) }
     } else {
       const t = setTimeout(() => setShow(false), 200)
       return () => clearTimeout(t)
@@ -87,17 +90,19 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
           </div>
 
           <div className="p-5 space-y-4 overflow-auto">
-            {/* Quick add */}
-            <div className="p-3 border rounded bg-muted/10 grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
-              <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Имя" value={name} onChange={(e) => setName(e.target.value)} />
-              <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Должность" value={position} onChange={(e) => setPosition(e.target.value)} />
-              <input className="h-9 px-3 rounded border bg-background text см md:col-span-2" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-              <input className="h-9 px-3 rounded border bg-background text-sm" placeholder="Зарплата" value={salary} onChange={(e) => setSalary(e.target.value)} />
-              <input className="h-9 px-3 rounded border bg-background text-sm" placeholder="Доход" value={revenue} onChange={(e) => setRevenue(e.target.value)} />
-              <div className="md:col-span-1 flex justify-end">
-                <button className="h-9 px-4 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2" onClick={onQuickAdd}><Plus className="h-4 w-4" /> Добавить</button>
+            {/* Quick add (admin only) */}
+            {isAdmin && (
+              <div className="p-3 border rounded bg-muted/10 grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
+                <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Имя" value={name} onChange={(e) => setName(e.target.value)} />
+                <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Должность" value={position} onChange={(e) => setPosition(e.target.value)} />
+                <input className="h-9 px-3 rounded border bg-background text см md:col-span-2" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <input className="h-9 px-3 rounded border bg-background text-sm" placeholder="Зарплата" value={salary} onChange={(e) => setSalary(e.target.value)} />
+                <input className="h-9 px-3 rounded border bg-background text-sm" placeholder="Доход" value={revenue} onChange={(e) => setRevenue(e.target.value)} />
+                <div className="md:col-span-1 flex justify-end">
+                  <button className="h-9 px-4 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2" onClick={onQuickAdd}><Plus className="h-4 w-4" /> Добавить</button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Filters */}
             <div className="p-3 border rounded bg-muted/5 grid grid-cols-1 md:grid-cols-5 gap-2">
@@ -117,7 +122,9 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
                       <div className="font-medium">{e.name}</div>
                       <div className="text-xs text-muted-foreground">{e.position} • {e.email}</div>
                     </div>
-                    <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={() => onRemove(e.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
+                    {isAdmin && (
+                      <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={() => onRemove(e.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
+                    )}
                   </div>
                   <div className="mt-2 flex items-center gap-2 text-xs">
                     <span className="text-muted-foreground">Статус:</span>

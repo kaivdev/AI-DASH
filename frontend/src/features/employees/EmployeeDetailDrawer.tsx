@@ -10,16 +10,19 @@ interface EmployeeDetailDrawerProps {
   onEdit: (id: string, patch: Partial<Omit<Employee, 'id' | 'created_at' | 'updated_at'>>) => void | Promise<void>
   onDelete: (id: string) => void | Promise<void>
   onUpdateStatus: (id: string, status: string, tag?: string) => void | Promise<void>
+  isAdmin?: boolean
 }
 
-export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete, onUpdateStatus }: EmployeeDetailDrawerProps) {
+export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete, onUpdateStatus, isAdmin }: EmployeeDetailDrawerProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [name, setName] = useState('')
   const [position, setPosition] = useState('')
   const [email, setEmail] = useState('')
   const [salary, setSalary] = useState('')
   const [revenue, setRevenue] = useState('')
-  const [hourlyRate, setHourlyRate] = useState('')
+  const [costHourly, setCostHourly] = useState('')
+  const [billHourly, setBillHourly] = useState('')
+  const [plannedHours, setPlannedHours] = useState('160')
 
   const [status, setStatus] = useState('')
   const [statusTag, setStatusTag] = useState('')
@@ -31,9 +34,11 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
       setEmail(employee.email || '')
       setSalary(typeof employee.salary === 'number' ? String(employee.salary) : '')
       setRevenue(typeof employee.revenue === 'number' ? String(employee.revenue) : '')
-      setHourlyRate(typeof (employee as any).hourly_rate === 'number' ? String((employee as any).hourly_rate) : '')
+  setCostHourly(typeof (employee as any).cost_hourly_rate === 'number' ? String((employee as any).cost_hourly_rate) : '')
+  setBillHourly(typeof (employee as any).bill_hourly_rate === 'number' ? String((employee as any).bill_hourly_rate) : '')
       setStatus(employee.current_status || '')
       setStatusTag(employee.status_tag || '')
+  setPlannedHours('160')
       setIsEditing(false)
     }
   }, [employee])
@@ -48,7 +53,8 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
       email: email.trim() || undefined,
       salary: salary ? Number(salary) : undefined,
       revenue: revenue ? Number(revenue) : undefined,
-      hourly_rate: hourlyRate ? Number(hourlyRate) : undefined,
+  cost_hourly_rate: costHourly ? Number(costHourly) : undefined,
+  bill_hourly_rate: billHourly ? Number(billHourly) : undefined,
     } as Partial<Omit<Employee, 'id' | 'created_at' | 'updated_at'>>
     await onEdit(e.id, patch)
     setIsEditing(false)
@@ -84,10 +90,22 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
                <div className="text-xs text-muted-foreground">Приносит доходов</div>
                <div>{typeof e.revenue === 'number' ? e.revenue : '—'}</div>
              </div>
-             <div>
-               <div className="text-xs text-muted-foreground">Почасовая ставка</div>
-               <div>{typeof (e as any).hourly_rate === 'number' ? `${(e as any).hourly_rate} ₽/ч` : '—'}</div>
-             </div>
+             {isAdmin && (
+               <div>
+                 <div className="text-xs text-muted-foreground">Себестоимость часа</div>
+                 <div>{typeof (e as any).cost_hourly_rate === 'number' ? `${(e as any).cost_hourly_rate} ₽/ч` : '—'}</div>
+               </div>
+             )}
+             {isAdmin && (
+               <div>
+                 <div className="text-xs text-muted-foreground">Биллинговая ставка</div>
+                 <div>{typeof (e as any).bill_hourly_rate === 'number' ? `${(e as any).bill_hourly_rate} ₽/ч` : '—'}</div>
+               </div>
+             )}
+            <div>
+              <div className="text-xs text-muted-foreground">План часов/мес</div>
+              <div>160</div>
+            </div>
              <div>
                <div className="text-xs text-muted-foreground">Создан</div>
                <div>{e.created_at || '—'}</div>
@@ -114,9 +132,11 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
             <button className="h-8 px-3 rounded border inline-flex items-center justify-center" onClick={() => setIsEditing(true)} title="Редактировать" aria-label="Редактировать">
               <Pencil className="h-4 w-4" />
             </button>
-            <button className="h-8 w-8 rounded border inline-flex items-center justify-center" onClick={() => onDelete(e.id)} title="Удалить" aria-label="Удалить">
-              <Trash2 className="h-4 w-4" />
-            </button>
+            {isAdmin && (
+              <button className="h-8 w-8 rounded border inline-flex items-center justify-center" onClick={() => onDelete(e.id)} title="Удалить" aria-label="Удалить">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -144,14 +164,31 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
                <label className="text-xs mb-1 block">Приносит доходов</label>
                <input className="h-9 px-3 rounded border bg-background w-full text-sm" type="number" value={revenue} onChange={(ev)=>setRevenue(ev.target.value)} />
              </div>
-             <div>
-               <label className="text-xs mb-1 block">Почасовая ставка (₽/ч)</label>
-               <input className="h-9 px-3 rounded border bg-background w-full text-sm" type="number" value={hourlyRate} onChange={(ev)=>setHourlyRate(ev.target.value)} />
+             {isAdmin && (
+               <div>
+                 <label className="text-xs mb-1 block">Себестоимость часа (₽/ч)</label>
+                 <input className="h-9 px-3 rounded border bg-background w-full text-sm" type="number" value={costHourly} onChange={(ev)=>setCostHourly(ev.target.value)} />
+               </div>
+             )}
+             {isAdmin && (
+               <div>
+                 <label className="text-xs mb-1 block">Биллинговая ставка (₽/ч)</label>
+                 <input className="h-9 px-3 rounded border bg-background w-full text-sm" type="number" value={billHourly} onChange={(ev)=>setBillHourly(ev.target.value)} />
+               </div>
+             )}
+             <div className="col-span-3 grid grid-cols-3 gap-3">
+               <div>
+                 <label className="text-xs mb-1 block">План часов/мес</label>
+                 <input className="h-9 px-3 rounded border bg-background w-full text-sm" type="number" value={plannedHours} onChange={(ev)=>setPlannedHours(ev.target.value)} />
+               </div>
+               <div className="col-span-2 flex items-end">
+                 <button className="h-9 px-3 rounded border text-sm" type="button" onClick={() => { const sal = Number(salary||0); const hrs = Math.max(1, Number(plannedHours||160)); if (sal>0 && hrs>0) setCostHourly(String(Math.round(sal/hrs))) }}>Рассчитать себестоимость из зарплаты</button>
+               </div>
              </div>
            </div>
           <div className="flex items-center gap-2 pt-2 border-t">
             <button className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2" onClick={onSave}><Save className="h-4 w-4" /> Сохранить</button>
-            <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={() => { setIsEditing(false); setName(e.name); setPosition(e.position); setEmail(e.email||''); setSalary(typeof e.salary==='number'?String(e.salary):''); setRevenue(typeof e.revenue==='number'?String(e.revenue):''); }}><CloseIcon className="h-4 w-4" /> Отмена</button>
+            <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={() => { setIsEditing(false); setName(e.name); setPosition(e.position); setEmail(e.email||''); setSalary(typeof e.salary==='number'?String(e.salary):''); setRevenue(typeof e.revenue==='number'?String(e.revenue):''); setCostHourly(typeof (e as any).cost_hourly_rate==='number'?String((e as any).cost_hourly_rate):''); setBillHourly(typeof (e as any).bill_hourly_rate==='number'?String((e as any).bill_hourly_rate):''); setPlannedHours('160'); }}><CloseIcon className="h-4 w-4" /> Отмена</button>
           </div>
         </div>
       )}

@@ -34,6 +34,21 @@ export function FinanceCard() {
   const expense = txs.filter((t) => (t as any).transaction_type === 'expense').reduce((s, t) => s + t.amount, 0)
   const balance = income - expense
 
+  // Per-employee profit
+  const perEmployeeAll = useMemo(() => {
+    const map = new Map<string, { income: number; expense: number }>()
+    for (const t of txs) {
+      const eid = (t as any).employee_id as string | undefined
+      if (!eid) continue
+      const row = map.get(eid) || { income: 0, expense: 0 }
+      if ((t as any).transaction_type === 'income') row.income += t.amount
+      else row.expense += t.amount
+      map.set(eid, row)
+    }
+    const rows = Array.from(map.entries()).map(([eid, v]) => ({ id: eid, name: employees.find(e=>e.id===eid)?.name || eid, income: v.income, expense: v.expense, profit: v.income - v.expense }))
+    return rows.sort((a,b)=> b.profit - a.profit)
+  }, [txs, employees])
+
   // Chart data by selected period
   const chartData = useMemo(() => {
     const sorted = txs.slice().sort((a,b)=> a.date.localeCompare(b.date))
@@ -115,6 +130,48 @@ export function FinanceCard() {
             </ResponsiveContainer>
           </div>
         </div>
+
+        {/* Top employees by прибыль */}
+        {perEmployeeAll.slice(0,4).length > 0 && (
+          <div className="rounded border p-3">
+            <div className="text-sm text-muted-foreground mb-2">Топ сотрудников по прибыли</div>
+            <div className="space-y-1">
+              {perEmployeeAll.slice(0,4).map((e) => (
+                <div key={e.id} className="flex items-center justify-between text-sm">
+                  <div className="truncate mr-2">{e.name}</div>
+                  <div className="inline-flex items-center gap-3 whitespace-nowrap">
+                    <span className="text-green-600">{formatCurrency(e.income,'RUB')}</span>
+                    <span className="text-red-600">{formatCurrency(e.expense,'RUB')}</span>
+                    <span className="font-medium">{formatCurrency(e.profit,'RUB')}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Full per-employee table */}
+        {perEmployeeAll.length > 0 && (
+          <div className="rounded border p-3">
+            <div className="text-sm text-muted-foreground mb-2">Прибыль по сотрудникам</div>
+            <div className="max-h-40 overflow-auto">
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 text-xs font-medium px-2 py-1 border-b">
+                <div>Сотрудник</div>
+                <div className="text-right">Доход</div>
+                <div className="text-right">Расход</div>
+                <div className="text-right">Прибыль</div>
+              </div>
+              {perEmployeeAll.map((e)=> (
+                <div key={e.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-2 py-1 text-sm border-b last:border-b-0">
+                  <div className="truncate mr-2">{e.name}</div>
+                  <div className="text-right text-green-600">{formatCurrency(e.income,'RUB')}</div>
+                  <div className="text-right text-red-600">{formatCurrency(e.expense,'RUB')}</div>
+                  <div className="text-right font-medium">{formatCurrency(e.profit,'RUB')}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Last transactions */}
         <div className="min-h-0 flex-1 overflow-auto">

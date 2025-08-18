@@ -9,6 +9,7 @@ import math
 
 import models
 import schemas
+from config import settings
 
 def generate_id() -> str:
     """Generate unique ID for entities"""
@@ -34,6 +35,8 @@ def serialize_user(user: models.User) -> dict:
             "twitter": profile.twitter,
             "timezone": profile.timezone,
             "locale": profile.locale,
+            # do not leak secrets; only indicate presence
+            "has_openrouter_key": bool(getattr(profile, "openrouter_api_key", None)),
         }
     return {
         "id": user.id,
@@ -64,12 +67,22 @@ def _round_hours(hours: float, step: float = 1.0) -> float:
     except Exception:
         return 0.0
 
-def _resolve_hourly_rate(db: Session, task: models.Task) -> Optional[int]:
-    """Resolve hourly rate for a task: override -> project member -> employee."""
-    if task.hourly_rate_override is not None:
-        return int(task.hourly_rate_override)
-    # try project member specific rate
-    if task.project_id and task.assigned_to:
+def _resolve_rates(db: Session, task: models.Task) -> tuple[Optional[int], Optional[int]]:
+    """
+    Resolve (cost_rate, bill_rate) for a task.
+    - cost_rate: task.override (legacy, treated as cost if set) -> employee.cost_hourly_rate -> employee.hourly_rate (legacy)
+    - bill_rate: task.override (legacy, if set we use the same) -> project_member.hourly_rate (treated as BILL) -> employee.bill_hourly_rate -> employee.hourly_rate (legacy)
+    """
+    # separate overrides have priority; legacy override applies to both
+    o_cost = getattr(task, "cost_rate_override", None)
+    o_bill = getattr(task, "bill_rate_override", None)
+    override = int(task.hourly_rate_override) if getattr(task, "hourly_rate_override", None) is not None else None
+    emp = None
+    if task.assigned_to:
+        emp = db.query(models.Employee).filter(models.Employee.id == task.assigned_to).first()
+    # cost: task override -> project member cost -> employee cost
+    cost_rate: Optional[int] = int(o_cost) if o_cost is not None else (override if override is not None else None)
+    if task.project_id and task.assigned_to and cost_rate is None:
         pm = (
             db.query(models.ProjectMember)
             .filter(
@@ -78,14 +91,37 @@ def _resolve_hourly_rate(db: Session, task: models.Task) -> Optional[int]:
             )
             .first()
         )
-        if pm and pm.hourly_rate is not None:
-            return int(pm.hourly_rate)
-    # fallback to employee rate
-    if task.assigned_to:
-        emp = db.query(models.Employee).filter(models.Employee.id == task.assigned_to).first()
-        if emp and emp.hourly_rate is not None:
-            return int(emp.hourly_rate)
-    return None
+        if pm:
+            if getattr(pm, "cost_hourly_rate", None) is not None:
+                cost_rate = int(pm.cost_hourly_rate)
+    if cost_rate is None and emp is not None:
+        if getattr(emp, "cost_hourly_rate", None) is not None:
+            cost_rate = int(emp.cost_hourly_rate)
+        elif getattr(emp, "hourly_rate", None) is not None:
+            cost_rate = int(emp.hourly_rate)
+
+    # bill: task override -> project member bill (or legacy hourly) -> employee bill
+    bill_rate: Optional[int] = int(o_bill) if o_bill is not None else (override if override is not None else None)
+    if bill_rate is None and task.project_id and task.assigned_to:
+        pm = (
+            db.query(models.ProjectMember)
+            .filter(
+                models.ProjectMember.project_id == task.project_id,
+                models.ProjectMember.employee_id == task.assigned_to,
+            )
+            .first()
+        )
+        if pm:
+            if getattr(pm, "bill_hourly_rate", None) is not None:
+                bill_rate = int(pm.bill_hourly_rate)
+            elif getattr(pm, "hourly_rate", None) is not None:
+                bill_rate = int(pm.hourly_rate)
+    if bill_rate is None and emp is not None:
+        if getattr(emp, "bill_hourly_rate", None) is not None:
+            bill_rate = int(emp.bill_hourly_rate)
+        elif getattr(emp, "hourly_rate", None) is not None:
+            bill_rate = int(emp.hourly_rate)
+    return cost_rate, bill_rate
 
 # Seed owner and registration code
 OWNER_EMAIL = "kaivasfilm@yandex.ru"
@@ -175,6 +211,72 @@ def ensure_employee_for_user(db: Session, user: models.User, first_name: Optiona
     db.commit()
     return emp
 
+# --- Chat sessions/messages ---
+def create_chat_session(db: Session, user_id: str, title: Optional[str] = None) -> models.ChatSession:
+    s = models.ChatSession(id=generate_id(), user_id=user_id, title=title)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+def list_chat_sessions(db: Session, user_id: str) -> list[models.ChatSession]:
+    return (
+        db.query(models.ChatSession)
+        .filter(models.ChatSession.user_id == user_id)
+        .order_by(models.ChatSession.updated_at.desc())
+        .all()
+    )
+
+def rename_chat_session(db: Session, user_id: str, session_id: str, title: Optional[str]) -> Optional[models.ChatSession]:
+    s = db.query(models.ChatSession).filter(models.ChatSession.id == session_id, models.ChatSession.user_id == user_id).first()
+    if not s:
+        return None
+    s.title = title
+    db.commit()
+    db.refresh(s)
+    return s
+
+def delete_chat_session(db: Session, user_id: str, session_id: str) -> bool:
+    s = db.query(models.ChatSession).filter(models.ChatSession.id == session_id, models.ChatSession.user_id == user_id).first()
+    if not s:
+        return False
+    db.delete(s)
+    db.commit()
+    return True
+
+def get_chat_session(db: Session, user_id: str, session_id: str) -> Optional[models.ChatSession]:
+    return db.query(models.ChatSession).filter(models.ChatSession.id == session_id, models.ChatSession.user_id == user_id).first()
+
+def add_chat_message(db: Session, session_id: str, role: str, content: str) -> models.ChatMessage:
+    m = models.ChatMessage(id=generate_id(), session_id=session_id, role=role, content=content)
+    db.add(m)
+    # update session.updated_at
+    s = db.query(models.ChatSession).filter(models.ChatSession.id == session_id).first()
+    if s:
+        s.updated_at = func.now()
+    db.commit()
+    db.refresh(m)
+    return m
+
+def list_chat_messages(db: Session, user_id: str, session_id: str) -> list[models.ChatMessage]:
+    s = get_chat_session(db, user_id, session_id)
+    if not s:
+        return []
+    return (
+        db.query(models.ChatMessage)
+        .filter(models.ChatMessage.session_id == session_id)
+        .order_by(models.ChatMessage.created_at.asc())
+        .all()
+    )
+
+def clear_chat_messages(db: Session, user_id: str, session_id: str) -> bool:
+    s = get_chat_session(db, user_id, session_id)
+    if not s:
+        return False
+    db.query(models.ChatMessage).filter(models.ChatMessage.session_id == session_id).delete()
+    db.commit()
+    return True
+
 # Employee CRUD
 def get_employees(db: Session) -> List[models.Employee]:
     return db.query(models.Employee).all()
@@ -190,9 +292,18 @@ def get_employee(db: Session, employee_id: str) -> Optional[models.Employee]:
     return db.query(models.Employee).filter(models.Employee.id == employee_id).first()
 
 def create_employee(db: Session, employee: schemas.EmployeeCreate) -> models.Employee:
+    data = employee.model_dump()
+    # Auto-calc cost_hourly_rate from salary if provided and no explicit cost rate
+    sal = data.get("salary")
+    if sal is not None and data.get("cost_hourly_rate") is None:
+        try:
+            hours = max(1, int(settings.PLANNED_MONTHLY_HOURS))
+        except Exception:
+            hours = 160
+        data["cost_hourly_rate"] = int(round(float(sal) / float(hours)))
     db_employee = models.Employee(
         id=generate_id(),
-        **employee.model_dump()
+        **data
     )
     db.add(db_employee)
     db.commit()
@@ -203,6 +314,16 @@ def update_employee(db: Session, employee_id: str, employee: schemas.EmployeeUpd
     db_employee = get_employee(db, employee_id)
     if db_employee:
         update_data = employee.model_dump(exclude_unset=True)
+        # If salary is updated and cost_hourly_rate not explicitly passed -> recalc
+        if "salary" in update_data and "cost_hourly_rate" not in update_data and update_data.get("salary") is not None:
+            try:
+                hours = max(1, int(settings.PLANNED_MONTHLY_HOURS))
+            except Exception:
+                hours = 160
+            try:
+                update_data["cost_hourly_rate"] = int(round(float(update_data["salary"]) / float(hours)))
+            except Exception:
+                pass
         for field, value in update_data.items():
             setattr(db_employee, field, value)
         db.commit()
@@ -221,11 +342,23 @@ def update_employee_status(db: Session, employee_id: str, status_update: schemas
 
 def delete_employee(db: Session, employee_id: str) -> bool:
     db_employee = get_employee(db, employee_id)
-    if db_employee:
+    if not db_employee:
+        return False
+    try:
+        # 1) Remove project memberships to avoid setting FK to NULL (NOT NULL constraint)
+        db.query(models.ProjectMember).filter(models.ProjectMember.employee_id == employee_id).delete(synchronize_session=False)
+        # 2) Nullify references in tasks and transactions
+        db.query(models.Task).filter(models.Task.assigned_to == employee_id).update({models.Task.assigned_to: None}, synchronize_session=False)
+        db.query(models.Transaction).filter(models.Transaction.employee_id == employee_id).update({models.Transaction.employee_id: None}, synchronize_session=False)
+        db.flush()
+
+        # 3) Finally delete the employee
         db.delete(db_employee)
         db.commit()
         return True
-    return False
+    except Exception:
+        db.rollback()
+        raise
 
 # Project CRUD
 def get_projects(db: Session) -> List[models.Project]:
@@ -233,7 +366,14 @@ def get_projects(db: Session) -> List[models.Project]:
     # Add member_ids and member_rates to each project
     for project in projects:
         project.member_ids = [m.employee_id for m in project.members]
+        # legacy single-rate map (treated as bill rate in old UI)
         project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
+        # new detailed maps
+        project.member_cost_rates = {m.employee_id: m.cost_hourly_rate for m in project.members}
+        project.member_bill_rates = {
+            m.employee_id: (m.bill_hourly_rate if m.bill_hourly_rate is not None else m.hourly_rate)
+            for m in project.members
+        }
     return projects
 
 # Scoping helpers
@@ -253,6 +393,11 @@ def list_projects_for_user(db: Session, user: models.User) -> List[models.Projec
     for project in projects:
         project.member_ids = [m.employee_id for m in project.members]
         project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
+        project.member_cost_rates = {m.employee_id: m.cost_hourly_rate for m in project.members}
+        project.member_bill_rates = {
+            m.employee_id: (m.bill_hourly_rate if m.bill_hourly_rate is not None else m.hourly_rate)
+            for m in project.members
+        }
     return projects
 
 def list_tasks_for_user(db: Session, user: models.User) -> List[models.Task]:
@@ -274,6 +419,11 @@ def get_project(db: Session, project_id: str) -> Optional[models.Project]:
     if project:
         project.member_ids = [m.employee_id for m in project.members]
         project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
+        project.member_cost_rates = {m.employee_id: m.cost_hourly_rate for m in project.members}
+        project.member_bill_rates = {
+            m.employee_id: (m.bill_hourly_rate if m.bill_hourly_rate is not None else m.hourly_rate)
+            for m in project.members
+        }
     return project
 
 def create_project(db: Session, project: schemas.ProjectCreate) -> models.Project:
@@ -325,12 +475,27 @@ def set_project_member_rate(db: Session, project_id: str, employee_id: str, hour
              models.ProjectMember.employee_id == employee_id)
     ).first()
     if not member:
-        # Create membership if missing (SQLite may not enforce FKs; this enables rate usage immediately)
+        # Create membership if missing
         member = models.ProjectMember(project_id=project_id, employee_id=employee_id)
         db.add(member)
         db.commit()
         db.refresh(member)
     member.hourly_rate = int(hourly_rate) if hourly_rate is not None else None
+    db.commit()
+    return True
+
+def set_project_member_rates(db: Session, project_id: str, employee_id: str, cost_hourly_rate: Optional[int], bill_hourly_rate: Optional[int]) -> bool:
+    member = db.query(models.ProjectMember).filter(
+        and_(models.ProjectMember.project_id == project_id,
+             models.ProjectMember.employee_id == employee_id)
+    ).first()
+    if not member:
+        member = models.ProjectMember(project_id=project_id, employee_id=employee_id)
+        db.add(member)
+        db.commit()
+        db.refresh(member)
+    member.cost_hourly_rate = int(cost_hourly_rate) if cost_hourly_rate is not None else None
+    member.bill_hourly_rate = int(bill_hourly_rate) if bill_hourly_rate is not None else None
     db.commit()
     return True
 
@@ -478,6 +643,17 @@ def update_task(db: Session, task_id: str, task: schemas.TaskUpdate) -> Optional
     db_task = get_task(db, task_id)
     if db_task:
         update_data = task.model_dump(exclude_unset=True)
+        
+        # Special handling for None/null values that need to be explicitly set
+        # Only for fields that were explicitly provided in the request
+        task_dict_with_unset = task.model_dump()  # Get all fields including None values
+        task_dict_exclude_unset = task.model_dump(exclude_unset=True)  # Get only set fields
+        
+        # Only handle null values for fields that were explicitly set in the request
+        for field_name in ['work_status']:  # Only work_status needs special null handling for Kanban
+            if field_name in task_dict_exclude_unset and task_dict_with_unset[field_name] is None:
+                update_data[field_name] = None
+        
         for field, value in update_data.items():
             setattr(db_task, field, value)
         db.commit()
@@ -488,26 +664,62 @@ def toggle_task(db: Session, task_id: str) -> Optional[models.Task]:
     db_task = get_task(db, task_id)
     if db_task:
         db_task.done = not db_task.done
-        # On closing task (done -> True) generate expense if billable
-        if db_task.done:
-            applied_rate = _resolve_hourly_rate(db, db_task)
-            db_task.applied_hourly_rate = applied_rate
-            if db_task.billable and applied_rate and (db_task.hours_spent or 0) > 0:
-                hours = _round_hours(db_task.hours_spent or 0.0)
-                amount = float(applied_rate) * float(hours)
-                tx = models.Transaction(
-                    id=generate_id(),
-                    transaction_type="expense",
-                    amount=amount,
-                    date=date.today(),
-                    category="Почасовая оплата",
-                    description=f"Задача: {db_task.content}",
-                    employee_id=db_task.assigned_to,
-                    project_id=db_task.project_id,
-                )
-                db.add(tx)
         db.commit()
         db.refresh(db_task)
+    return db_task
+
+def generate_task_finance_if_needed(db: Session, task_id: str) -> Optional[models.Task]:
+    """When task is approved as completed, generate finance records once and set applied rates.
+    Idempotent: will not create duplicate transactions if ids already set.
+    """
+    db_task = get_task(db, task_id)
+    if not db_task:
+        return None
+    if not db_task.done:
+        return db_task
+    # If already generated, skip
+    already_has_any = bool(getattr(db_task, "income_tx_id", None) or getattr(db_task, "expense_tx_id", None))
+    # Always set applied rates for audit (may be useful even if no transactions)
+    cost_rate, bill_rate = _resolve_rates(db, db_task)
+    db_task.applied_hourly_rate = bill_rate or cost_rate
+    db_task.applied_cost_rate = cost_rate
+    db_task.applied_bill_rate = bill_rate
+    if not already_has_any and db_task.billable and (db_task.hours_spent or 0) > 0:
+        hours = _round_hours(db_task.hours_spent or 0.0)
+        # Expense (cost)
+        if cost_rate:
+            exp_amount = float(cost_rate) * float(hours)
+            exp_tx = models.Transaction(
+                id=generate_id(),
+                transaction_type="expense",
+                amount=exp_amount,
+                date=date.today(),
+                category="Почасовая оплата (себестоимость)",
+                description=f"Задача: {db_task.content}",
+                employee_id=db_task.assigned_to,
+                project_id=db_task.project_id,
+                task_id=db_task.id,
+            )
+            db.add(exp_tx)
+            db_task.expense_tx_id = exp_tx.id
+        # Income (billing)
+        if bill_rate:
+            inc_amount = float(bill_rate) * float(hours)
+            inc_tx = models.Transaction(
+                id=generate_id(),
+                transaction_type="income",
+                amount=inc_amount,
+                date=date.today(),
+                category="Выручка за часы",
+                description=f"Задача: {db_task.content}",
+                employee_id=db_task.assigned_to,
+                project_id=db_task.project_id,
+                task_id=db_task.id,
+            )
+            db.add(inc_tx)
+            db_task.income_tx_id = inc_tx.id
+    db.commit()
+    db.refresh(db_task)
     return db_task
 
 def delete_task(db: Session, task_id: str) -> bool:
@@ -661,7 +873,17 @@ def update_user_profile(db: Session, user_id: str, name: Optional[str], profile_
         user.name = name
     if profile_patch:
         profile = ensure_user_profile(db, user.id)
+        # Handle secret update explicitly; allow clearing via empty string/null
+        if "openrouter_api_key" in profile_patch:
+            v = profile_patch.get("openrouter_api_key")
+            if v is None or (isinstance(v, str) and v.strip() == ""):
+                profile.openrouter_api_key = None
+            else:
+                profile.openrouter_api_key = str(v).strip()
+        # Apply other public fields
         for k, v in profile_patch.items():
+            if k == "openrouter_api_key":
+                continue
             setattr(profile, k, v)
     db.commit()
     db.refresh(user)

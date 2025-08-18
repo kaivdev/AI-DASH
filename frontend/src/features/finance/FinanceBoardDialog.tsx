@@ -69,8 +69,10 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
       setShow(true)
       const prev = document.body.style.overflow
       document.body.style.overflow = 'hidden'
-      if (presetType) setType(presetType)
-      return () => { document.body.style.overflow = prev }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+  document.addEventListener('keydown', onKey)
+  if (presetType) setType(presetType)
+  return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey) }
     } else {
       const t = setTimeout(() => setShow(false), 200)
       return () => clearTimeout(t)

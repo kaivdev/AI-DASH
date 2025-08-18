@@ -1,7 +1,8 @@
 const API_BASE_URL = 'http://localhost:8000/api'
+const __DEV__ = typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.DEV
 
 // Generic API functions
-async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+export async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
   const token = (typeof localStorage !== 'undefined' && localStorage.getItem('ai-life-auth'))
     ? (() => { try { return JSON.parse(localStorage.getItem('ai-life-auth') as string).state.token } catch { return null } })()
@@ -15,6 +16,13 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
     ...options,
   }
 
+  if (__DEV__) {
+    const m = (config.method || 'GET').toString().toUpperCase()
+    // Don't spam body logs if big
+    const bodyPreview = typeof config.body === 'string' && config.body.length < 500 ? config.body : undefined
+    console.debug('[api] =>', m, url, bodyPreview ? { body: bodyPreview } : undefined)
+  }
+
   try {
     const response = await fetch(url, config)
     
@@ -22,11 +30,13 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
       throw new Error(`HTTP error! status: ${response.status}`)
     }
     
-    // no content
+  // no content
     if (response.status === 204) return undefined as unknown as T
-    return await response.json()
+  const json = await response.json()
+  if (__DEV__) console.debug('[api] <=', response.status, url)
+  return json
   } catch (error) {
-    console.error(`API request failed: ${endpoint}`, error)
+  console.error(`[api] ERROR ${endpoint}`, error)
     throw error
   }
 }
@@ -77,6 +87,13 @@ export const projectApi = {
   setMemberRate: (projectId: string, employeeId: string, hourly_rate: number | null) => apiRequest(`/projects/${projectId}/members/${employeeId}/rate${hourly_rate!==null?`?hourly_rate=${hourly_rate}`:''}`, {
     method: 'PUT',
   }),
+  setMemberRates: (projectId: string, employeeId: string, p: { cost_hourly_rate?: number|null, bill_hourly_rate?: number|null }) => {
+    const q: string[] = []
+    if (p.cost_hourly_rate !== undefined) q.push(`cost_hourly_rate=${p.cost_hourly_rate===null?'':p.cost_hourly_rate}`)
+    if (p.bill_hourly_rate !== undefined) q.push(`bill_hourly_rate=${p.bill_hourly_rate===null?'':p.bill_hourly_rate}`)
+    const qs = q.length?`?${q.join('&')}`:''
+    return apiRequest(`/projects/${projectId}/members/${employeeId}/rates${qs}`, { method: 'PUT' })
+  },
   addLink: (projectId: string, link: any) => apiRequest(`/projects/${projectId}/links`, {
     method: 'POST',
     body: JSON.stringify(link),
@@ -207,3 +224,13 @@ export const authApi = {
   }),
   logout: () => apiRequest('/auth/logout', { method: 'POST' }),
 } 
+
+// Chat API (server-side sessions)
+export const chatApi = {
+  sessions: () => apiRequest('/chat/sessions'),
+  create: (title?: string) => apiRequest('/chat/sessions', { method: 'POST', body: JSON.stringify({ title }) }),
+  rename: (id: string, title: string) => apiRequest(`/chat/sessions/${id}`, { method: 'PUT', body: JSON.stringify({ title }) }),
+  remove: (id: string) => apiRequest(`/chat/sessions/${id}`, { method: 'DELETE' }),
+  messages: (id: string) => apiRequest(`/chat/sessions/${id}/messages`),
+  clear: (id: string) => apiRequest(`/chat/sessions/${id}/messages`, { method: 'DELETE' }),
+}

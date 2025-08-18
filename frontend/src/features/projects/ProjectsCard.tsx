@@ -172,12 +172,14 @@ export function ProjectsCard() {
       title="Проекты"
       size="2x2"
       headerActions={
-        <button
+  isAdmin && (
+  <button
           className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
           onClick={() => setShowAddForm(!showAddForm)}
         >
           {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
         </button>
+  )
       }
     >
              <ProjectBoardDialog
@@ -185,10 +187,10 @@ export function ProjectsCard() {
          projects={projects as any}
          employees={employees}
          onClose={() => setBoardOpen(false)}
-         onAdd={(p) => add(p as any)}
-         onRemove={(id) => remove(id)}
-         onAddMember={(pid, eid) => addMember(pid, eid)}
-         onRemoveMember={(pid, eid) => removeMember(pid, eid)}
+         onAdd={(p) => isAdmin ? add(p as any) : undefined}
+         onRemove={(id) => { if (isAdmin) remove(id) }}
+         onAddMember={(pid, eid) => isAdmin ? addMember(pid, eid) : undefined}
+         onRemoveMember={(pid, eid) => isAdmin ? removeMember(pid, eid) : undefined}
          onAddLink={(pid, link) => addLink(pid, link as any)}
          onRemoveLink={(pid, lid) => removeLink(pid, lid)}
          onUpdateStatus={(pid, st) => useProjects.getState().update(pid, { status: st } as any)}
@@ -202,18 +204,18 @@ export function ProjectsCard() {
         employees={employees}
         onClose={() => setDetailOpen(false)}
         onEdit={async (id, patch) => { try { await updateProject(id, patch as any) } catch {} }}
-        onRemove={async (id) => { try { await remove(id) } catch {} setDetailOpen(false) }}
-        onAddMember={async (pid, eid) => { try { await addMember(pid, eid) } catch {} }}
-        onRemoveMember={async (pid, eid) => { try { await removeMember(pid, eid) } catch {} }}
+  onRemove={async (id) => { if (!isAdmin) return; try { await remove(id) } catch {} setDetailOpen(false) }}
+  onAddMember={async (pid, eid) => { if (!isAdmin) return; try { await addMember(pid, eid) } catch {} }}
+  onRemoveMember={async (pid, eid) => { if (!isAdmin) return; try { await removeMember(pid, eid) } catch {} }}
         onAddLink={async (pid, link) => { try { await addLink(pid, link as any) } catch {} }}
-        onRemoveLink={async (pid, lid) => { try { await removeLink(pid, lid) } catch {} }}
-        onSetMemberRate={async (pid, eid, rate) => { try { await (await import('@/lib/api')).projectApi.setMemberRate(pid, eid, rate === null ? null : Number(rate)); const current = useProjects.getState().projects.find(p=>p.id===pid) as any; const nextRates = { ...(current?.member_rates||{}), [eid]: rate ?? null }; useProjects.getState().update(pid, { member_rates: nextRates } as any) } catch {} }}
+  onRemoveLink={async (pid, lid) => { try { await removeLink(pid, lid) } catch {} }}
+  isAdmin={isAdmin}
       />
 
       <div className="flex flex-col gap-4 h-full min-h-0">
         <div className="text-sm text-muted-foreground">Всего: {projects.length}</div>
 
-        {showAddForm && (
+  {isAdmin && showAddForm && (
           <div className="p-3 border rounded bg-muted/10">
             <div className="space-y-3">
               <div>
@@ -313,9 +315,11 @@ export function ProjectsCard() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => startInlineEdit(project)} title="Редактировать" aria-label="Редактировать">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
+                    {isAdmin && (
+                      <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => startInlineEdit(project)} title="Редактировать" aria-label="Редактировать">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <button 
                       className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
                       onClick={() => remove(project.id)}
@@ -340,7 +344,7 @@ export function ProjectsCard() {
                     const projTasks = tasks.filter(t => (t as any).project_id === project.id)
                     const totalHours = projTasks.reduce((s, t) => s + (t.hours_spent || 0), 0)
                     const billableSum = isAdmin ? projTasks.filter(t => t.billable).reduce((s, t) => {
-                      const rate = (t.applied_hourly_rate ?? t.hourly_rate_override) ?? 0
+                      const rate = (((t as any).applied_bill_rate ?? (t as any).bill_rate_override) ?? 0)
                       return s + (rate * (t.hours_spent || 0))
                     }, 0) : null
                     return (

@@ -72,7 +72,7 @@
   }
 
   * { @apply border-border; }
-  html { @apply scroll-smooth; }
+  html { @apply scroll-smooth; scrollbar-gutter: stable; }
   body { @apply bg-background text-foreground; }
 
   /* Global scrollbar (dark-friendly) */

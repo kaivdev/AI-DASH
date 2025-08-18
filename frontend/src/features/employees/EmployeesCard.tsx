@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { EmployeeBoardDialog } from './EmployeeBoardDialog'
 import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
 import { EmployeeDetailDrawer } from './EmployeeDetailDrawer'
+import { useAuth } from '@/stores/useAuth'
 
 export function EmployeesCard() {
   const employees = useEmployees((s) => s.employees)
@@ -14,13 +15,18 @@ export function EmployeesCard() {
   const remove = useEmployees((s) => s.remove)
   const fetchEmployees = useEmployees((s) => s.fetchEmployees)
 
+  const user = useAuth((s) => s.user)
+  const isAdmin = (user?.role === 'owner' || user?.role === 'admin')
+
   const [showAddForm, setShowAddForm] = useState(false)
   const [name, setName] = useState('')
   const [position, setPosition] = useState('')
   const [email, setEmail] = useState('')
   const [salary, setSalary] = useState('')
   const [revenue, setRevenue] = useState('')
-  const [hourlyRate, setHourlyRate] = useState('')
+  const [costHourly, setCostHourly] = useState('')
+  const [billHourly, setBillHourly] = useState('')
+  const [plannedHours, setPlannedHours] = useState('160')
 
   const [statusId, setStatusId] = useState('')
   const [newStatus, setNewStatus] = useState('')
@@ -51,7 +57,8 @@ export function EmployeesCard() {
       email: email.trim() || undefined,
       salary: salary ? Number(salary) : undefined,
       revenue: revenue ? Number(revenue) : undefined,
-      hourly_rate: hourlyRate ? Number(hourlyRate) : undefined,
+      cost_hourly_rate: costHourly ? Number(costHourly) : undefined,
+      bill_hourly_rate: billHourly ? Number(billHourly) : undefined,
       current_status: 'Новый сотрудник',
       status_tag: undefined,
       status_date: new Date().toISOString().slice(0, 10),
@@ -61,6 +68,9 @@ export function EmployeesCard() {
     setEmail('')
     setSalary('')
     setRevenue('')
+    setCostHourly('')
+    setBillHourly('')
+    setPlannedHours('160')
     setShowAddForm(false)
   }
 
@@ -80,21 +90,24 @@ export function EmployeesCard() {
       title="Сотрудники"
       size="2x2"
       headerActions={
-        <button
-          className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
-          onClick={() => setShowAddForm(!showAddForm)}
-        >
-          {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
-        </button>
+        isAdmin && (
+          <button
+            className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
+            onClick={() => setShowAddForm(!showAddForm)}
+          >
+            {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+          </button>
+        )
       }
     >
       <EmployeeBoardDialog
         open={boardOpen}
         employees={employees}
         onClose={() => setBoardOpen(false)}
-        onAdd={(e) => add(e as any)}
-        onRemove={(id) => remove(id)}
+        onAdd={(e) => { if (isAdmin) return add(e as any) as any; return Promise.resolve() }}
+        onRemove={(id) => { if (isAdmin) remove(id) }}
         onUpdateStatus={(id, s, t) => updateStatus(id, s, t)}
+        isAdmin={isAdmin}
       />
 
       <EmployeeDetailDrawer
@@ -102,14 +115,15 @@ export function EmployeesCard() {
         employee={detailEmployee}
         onClose={() => setDetailOpen(false)}
         onEdit={async (id, patch) => { try { await update(id, patch) } catch {} }}
-        onDelete={async (id) => { try { await remove(id) } catch {} setDetailOpen(false) }}
+        onDelete={async (id) => { if (!isAdmin) return; try { await remove(id) } catch {} setDetailOpen(false) }}
         onUpdateStatus={async (id, s, t) => { try { await updateStatus(id, s, t) } catch {} }}
+  isAdmin={isAdmin}
       />
 
       <div className="flex flex-col gap-4 h-full min-h-0">
         <div className="text-sm text-muted-foreground">Всего: {employees.length}</div>
 
-        {showAddForm && (
+        {isAdmin && showAddForm && (
           <div className="p-3 border rounded bg-muted/10">
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
@@ -160,14 +174,33 @@ export function EmployeesCard() {
                 />
               </div>
               <div>
-                <label className="text-xs mb-1 block">Почасовая ставка (₽/ч)</label>
+                <label className="text-xs mb-1 block">Себестоимость часа (₽/ч)</label>
                 <input 
                   type="number"
-                  value={hourlyRate} 
-                  onChange={(e) => setHourlyRate(e.target.value)}
+                  value={costHourly} 
+                  onChange={(e) => setCostHourly(e.target.value)}
                   className="h-8 px-3 rounded border bg-background w-full text-sm"
-                  placeholder="1500"
+                  placeholder="Напр. 800"
                 />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block">Биллинговая ставка (₽/ч)</label>
+                <input 
+                  type="number"
+                  value={billHourly} 
+                  onChange={(e) => setBillHourly(e.target.value)}
+                  className="h-8 px-3 rounded border bg-background w-full text-sm"
+                  placeholder="Напр. 1200"
+                />
+              </div>
+              <div className="col-span-2 grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs mb-1 block">План часов/мес</label>
+                  <input type="number" value={plannedHours} onChange={(e)=>setPlannedHours(e.target.value)} className="h-8 px-3 rounded border bg-background w-full text-sm" placeholder="160" />
+                </div>
+                <div className="col-span-2 flex items-end">
+                  <button className="h-8 px-3 rounded border text-sm" type="button" onClick={() => { const sal = Number(salary||0); const hrs = Math.max(1, Number(plannedHours||160)); if (sal>0 && hrs>0) setCostHourly(String(Math.round(sal/hrs))) }}>Рассчитать себестоимость из зарплаты</button>
+                </div>
               </div>
             </div>
             <button 
@@ -191,13 +224,15 @@ export function EmployeesCard() {
                       <div className="text-xs text-muted-foreground">{emp.email}</div>
                     )}
                   </div>
-                  <button 
-                    className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-                    onClick={() => remove(emp.id)}
-                    title="Удалить" aria-label="Удалить"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {isAdmin && (
+                    <button 
+                      className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
+                      onClick={() => remove(emp.id)}
+                      title="Удалить" aria-label="Удалить"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
                 
                 <div className="text_sm mb-2">
@@ -208,10 +243,14 @@ export function EmployeesCard() {
                     {typeof emp.revenue === 'number' && (
                       <span className="text-green-600 dark:text-green-300">📈 {formatCurrency(emp.revenue, 'RUB')}</span>
                     )}
-                    {(emp as any).hourly_rate !== undefined && (
-                      <span>⏱ {(emp as any).hourly_rate} ₽/ч</span>
-                    )}
                   </div>
+                </div>
+
+                {/* Info bar: cost/bill rates and planned hours (hide rates for non-admins) */}
+                <div className="text-xs mb-2 inline-flex flex-wrap items-center gap-2">
+                  {isAdmin && (<span className="px-1.5 py-0.5 rounded bg-muted">Себест.: {typeof (emp as any).cost_hourly_rate === 'number' ? `${(emp as any).cost_hourly_rate} ₽/ч` : '—'}</span>)}
+                  {isAdmin && (<span className="px-1.5 py-0.5 rounded bg-muted">Биллинг: {typeof (emp as any).bill_hourly_rate === 'number' ? `${(emp as any).bill_hourly_rate} ₽/ч` : '—'}</span>)}
+                  <span className="px-1.5 py-0.5 rounded bg-muted">План: 160 ч/мес</span>
                 </div>
 
                 <div className="text-sm mb-2">
@@ -257,6 +296,44 @@ export function EmployeesCard() {
                     <ArrowUpRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
+
+                {/* Inline quick edit for rates (admin only) */}
+                {isAdmin && (
+                  <div className="mt-2 flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">Ставки:</span>
+                    <input
+                      id={`erc-${emp.id}`}
+                      type="number"
+                      className="h-7 px-2 rounded border bg-background w-24"
+                      placeholder="Себест. ₽/ч"
+                      defaultValue={typeof (emp as any).cost_hourly_rate === 'number' ? String((emp as any).cost_hourly_rate) : ''}
+                    />
+                    <input
+                      id={`erb-${emp.id}`}
+                      type="number"
+                      className="h-7 px-2 rounded border bg-background w-24"
+                      placeholder="Биллинг ₽/ч"
+                      defaultValue={typeof (emp as any).bill_hourly_rate === 'number' ? String((emp as any).bill_hourly_rate) : ''}
+                    />
+                    <button
+                      className="h-7 px-2 rounded border"
+                      onClick={async () => {
+                        const ec = document.getElementById(`erc-${emp.id}`) as HTMLInputElement | null
+                        const eb = document.getElementById(`erb-${emp.id}`) as HTMLInputElement | null
+                        const vc = ec?.value?.trim()
+                        const vb = eb?.value?.trim()
+                        try {
+                          await update(emp.id, {
+                            cost_hourly_rate: vc ? Number(vc) : null,
+                            bill_hourly_rate: vb ? Number(vb) : null,
+                          } as any)
+                        } catch {}
+                      }}
+                    >
+                      Применить
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -264,4 +341,4 @@ export function EmployeesCard() {
       </div>
     </ModuleCard>
   )
-} 
+}

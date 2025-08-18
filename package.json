@@ -1,5 +1,7 @@
 {
   "dependencies": {
+    "@tailwindcss/line-clamp": "^0.4.4",
+    "@types/node": "^24.3.0",
     "class-variance-authority": "^0.7.1"
   }
 }

@@ -14,46 +14,13 @@ import models
 import schemas
 import crud
 from database import engine, get_db
+from telegram_notifier import send_message, set_webhook, get_webhook_info, delete_webhook, get_updates
+from telegram_notifier import delete_message
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
-# Ensure new columns exist for SQLite (simple online migration)
-from sqlalchemy import text
-
-def _ensure_sqlite_columns():
-    # Only run on SQLite; no-op for PostgreSQL
-    if engine.dialect.name != "sqlite":
-        return
-    try:
-        with engine.connect() as conn:
-            # employees.hourly_rate
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('employees')")).fetchall()]
-            if 'hourly_rate' not in cols:
-                conn.execute(text("ALTER TABLE employees ADD COLUMN hourly_rate INTEGER"))
-            # project_members.hourly_rate
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('project_members')")).fetchall()]
-            if 'hourly_rate' not in cols:
-                conn.execute(text("ALTER TABLE project_members ADD COLUMN hourly_rate INTEGER"))
-            # tasks new columns
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('tasks')")).fetchall()]
-            if 'hours_spent' not in cols:
-                conn.execute(text("ALTER TABLE tasks ADD COLUMN hours_spent REAL DEFAULT 0.0 NOT NULL"))
-            if 'billable' not in cols:
-                conn.execute(text("ALTER TABLE tasks ADD COLUMN billable BOOLEAN DEFAULT 1 NOT NULL"))
-            if 'hourly_rate_override' not in cols:
-                conn.execute(text("ALTER TABLE tasks ADD COLUMN hourly_rate_override INTEGER"))
-            if 'applied_hourly_rate' not in cols:
-                conn.execute(text("ALTER TABLE tasks ADD COLUMN applied_hourly_rate INTEGER"))
-            # transactions.project_id
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info('transactions')")).fetchall()]
-            if 'project_id' not in cols:
-                conn.execute(text("ALTER TABLE transactions ADD COLUMN project_id TEXT"))
-            conn.commit()
-    except Exception as e:
-        print(f"Migration check error: {e}")
-
-_ensure_sqlite_columns()
+from sqlalchemy import text as _text
 
 # Ensure PostgreSQL extra columns/constraints exist
 from sqlalchemy import text as _text
@@ -66,30 +33,67 @@ def _ensure_postgres_schema():
             # employees.user_id unique FK
             conn.execute(_text("ALTER TABLE IF EXISTS employees ADD COLUMN IF NOT EXISTS user_id TEXT UNIQUE"))
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='employees' AND constraint_name='employees_user_fk') THEN ALTER TABLE employees ADD CONSTRAINT employees_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
+            # employees new rate columns (robust IF NOT EXISTS)
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='hourly_rate') THEN ALTER TABLE employees ADD COLUMN hourly_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='cost_hourly_rate') THEN ALTER TABLE employees ADD COLUMN cost_hourly_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='bill_hourly_rate') THEN ALTER TABLE employees ADD COLUMN bill_hourly_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='telegram_chat_id') THEN ALTER TABLE employees ADD COLUMN telegram_chat_id TEXT; END IF; END $$;"))
             # notes/reading_items/goals.user_id
             conn.execute(_text("ALTER TABLE IF EXISTS notes ADD COLUMN IF NOT EXISTS user_id TEXT"))
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='notes' AND constraint_name='notes_user_fk') THEN ALTER TABLE notes ADD CONSTRAINT notes_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='notes' AND column_name='shared') THEN ALTER TABLE notes ADD COLUMN shared BOOLEAN NOT NULL DEFAULT FALSE; END IF; END $$;"))
             conn.execute(_text("ALTER TABLE IF EXISTS reading_items ADD COLUMN IF NOT EXISTS user_id TEXT"))
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='reading_items' AND constraint_name='reading_items_user_fk') THEN ALTER TABLE reading_items ADD CONSTRAINT reading_items_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
             conn.execute(_text("ALTER TABLE IF EXISTS goals ADD COLUMN IF NOT EXISTS user_id TEXT"))
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='goals' AND constraint_name='goals_user_fk') THEN ALTER TABLE goals ADD CONSTRAINT goals_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
             # unique membership
             conn.execute(_text("CREATE UNIQUE INDEX IF NOT EXISTS uq_project_members_pair ON project_members(project_id, employee_id)"))
+            # project_members additional rates
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='project_members' AND column_name='hourly_rate') THEN ALTER TABLE project_members ADD COLUMN hourly_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='project_members' AND column_name='cost_hourly_rate') THEN ALTER TABLE project_members ADD COLUMN cost_hourly_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='project_members' AND column_name='bill_hourly_rate') THEN ALTER TABLE project_members ADD COLUMN bill_hourly_rate INTEGER; END IF; END $$;"))
             # task approval columns
-            conn.execute(_text("ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT FALSE"))
-            conn.execute(_text("ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='approved') THEN ALTER TABLE tasks ADD COLUMN approved BOOLEAN NOT NULL DEFAULT FALSE; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='approved_at') THEN ALTER TABLE tasks ADD COLUMN approved_at TIMESTAMPTZ; END IF; END $$;"))
+            # task rate audit and tx links
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='hourly_rate_override') THEN ALTER TABLE tasks ADD COLUMN hourly_rate_override INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='cost_rate_override') THEN ALTER TABLE tasks ADD COLUMN cost_rate_override INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='bill_rate_override') THEN ALTER TABLE tasks ADD COLUMN bill_rate_override INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='applied_hourly_rate') THEN ALTER TABLE tasks ADD COLUMN applied_hourly_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='applied_cost_rate') THEN ALTER TABLE tasks ADD COLUMN applied_cost_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='applied_bill_rate') THEN ALTER TABLE tasks ADD COLUMN applied_bill_rate INTEGER; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='income_tx_id') THEN ALTER TABLE tasks ADD COLUMN income_tx_id TEXT; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='expense_tx_id') THEN ALTER TABLE tasks ADD COLUMN expense_tx_id TEXT; END IF; END $$;"))
+            # transactions.task_id
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='task_id') THEN ALTER TABLE transactions ADD COLUMN task_id TEXT; END IF; END $$;"))
+            # user_profiles.openrouter_api_key
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='user_profiles' AND column_name='openrouter_api_key') THEN ALTER TABLE user_profiles ADD COLUMN openrouter_api_key TEXT; END IF; END $$;"))
             conn.commit()
     except Exception as e:
         print(f"PostgreSQL schema ensure error: {e}")
 
 _ensure_postgres_schema()
 
+def _backfill_task_approvals():
+    """One-time backfill: mark existing completed tasks as approved to preserve legacy semantics."""
+    try:
+        with engine.begin() as conn:
+            # Only set approved for legacy records where approved is NULL; keep awaiting approvals (approved = FALSE) intact
+            conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP) WHERE done = TRUE AND approved IS NULL"))
+    except Exception as e:
+        print(f"Backfill approvals error: {e}")
+
 app = FastAPI(title="Dashboard API", version="1.0.0")
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # React dev server
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],  # React dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -104,6 +108,11 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+
+# Pending Telegram link state per chat: { chat_id: {"email": str, "ts": datetime.utcnow()} }
+_PENDING_LINKS: dict[str, dict] = {}
 
 @app.on_event("startup")
 def startup_seed():
@@ -113,10 +122,25 @@ def startup_seed():
         crud.ensure_owner_and_code(db)
     finally:
         db.close()
+    # Backfill: approve all already completed tasks (compatibility)
+    _backfill_task_approvals()
+    # Try to set Telegram webhook if configured; otherwise start long polling in background
+    try:
+        from config import settings as _cfg
+        if _cfg.TELEGRAM_WEBHOOK_URL:
+            set_webhook()
+        else:
+            _start_telegram_long_polling()
+    except Exception:
+        pass
 
 @app.get("/")
 async def root():
     return {"message": "Dashboard API is running"}
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
 
 # --- Auth endpoints ---
 @app.post("/api/auth/register", response_model=schemas.AuthResponse)
@@ -238,11 +262,26 @@ def get_employee(employee_id: str, db: Session = Depends(get_db)):
     return employee
 
 @app.post("/api/employees", response_model=schemas.Employee)
-def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_db)):
+def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can create employees
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     return crud.create_employee(db, employee)
 
 @app.put("/api/employees/{employee_id}", response_model=schemas.Employee)
-def update_employee(employee_id: str, employee: schemas.EmployeeUpdate, db: Session = Depends(get_db)):
+def update_employee(employee_id: str, employee: schemas.EmployeeUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Non-admin users cannot change rate-related fields
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            forbidden_fields = {"hourly_rate", "cost_hourly_rate", "bill_hourly_rate", "revenue", "salary"}
+            payload = employee.model_dump(exclude_unset=True)
+            if any(f in payload for f in forbidden_fields):
+                raise HTTPException(status_code=403, detail="Forbidden: insufficient permissions to modify these fields")
     db_employee = crud.update_employee(db, employee_id, employee)
     if not db_employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -256,7 +295,13 @@ def update_employee_status(employee_id: str, status_update: schemas.EmployeeStat
     return db_employee
 
 @app.delete("/api/employees/{employee_id}", response_model=schemas.MessageResponse)
-def delete_employee(employee_id: str, db: Session = Depends(get_db)):
+def delete_employee(employee_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can delete employees
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     if crud.delete_employee(db, employee_id):
         return {"message": "Employee deleted successfully"}
     raise HTTPException(status_code=404, detail="Employee not found")
@@ -315,18 +360,47 @@ def delete_project(project_id: str, db: Session = Depends(get_db), authorization
     raise HTTPException(status_code=404, detail="Project not found")
 
 @app.post("/api/projects/{project_id}/members", response_model=schemas.MessageResponse)
-def add_project_member(project_id: str, member: schemas.ProjectMemberAdd, db: Session = Depends(get_db)):
+def add_project_member(project_id: str, member: schemas.ProjectMemberAdd, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can manage project members
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     if crud.add_project_member(db, project_id, member.employee_id):
         return {"message": "Member added successfully"}
     raise HTTPException(status_code=400, detail="Member already exists or invalid data")
 
 @app.put("/api/projects/{project_id}/members/{employee_id}/rate", response_model=schemas.MessageResponse)
-def set_project_member_rate(project_id: str, employee_id: str, hourly_rate: int | None = None, db: Session = Depends(get_db)):
+def set_project_member_rate(project_id: str, employee_id: str, hourly_rate: int | None = None, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can change member rates
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     crud.set_project_member_rate(db, project_id, employee_id, hourly_rate)
     return {"message": "Rate updated"}
 
+@app.put("/api/projects/{project_id}/members/{employee_id}/rates", response_model=schemas.MessageResponse)
+def set_project_member_rates(project_id: str, employee_id: str, cost_hourly_rate: int | None = None, bill_hourly_rate: int | None = None, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can change member rates
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
+    crud.set_project_member_rates(db, project_id, employee_id, cost_hourly_rate, bill_hourly_rate)
+    return {"message": "Rates updated"}
+
 @app.delete("/api/projects/{project_id}/members/{employee_id}", response_model=schemas.MessageResponse)
-def remove_project_member(project_id: str, employee_id: str, db: Session = Depends(get_db)):
+def remove_project_member(project_id: str, employee_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only admin/owner can manage project members
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user and user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     if crud.remove_project_member(db, project_id, employee_id):
         return {"message": "Member removed successfully"}
     raise HTTPException(status_code=404, detail="Member not found")
@@ -401,7 +475,194 @@ def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db), authori
         user = crud.get_user_by_token(db, token)
         if user and user.role not in ("owner", "admin"):
             raise HTTPException(status_code=403, detail="Forbidden")
-    return crud.create_task(db, task)
+    created = crud.create_task(db, task)
+    # Notify assignee via Telegram if chat linked
+    try:
+        if created.assigned_to:
+            emp = db.query(models.Employee).filter(models.Employee.id == created.assigned_to).first()
+            if emp and getattr(emp, 'telegram_chat_id', None):
+                parts = []
+                parts.append(f"Новая задача: <b>{created.content}</b>")
+                if created.due_date:
+                    parts.append(f"Срок: {created.due_date.isoformat()}")
+                if created.priority:
+                    parts.append(f"Приоритет: {created.priority}")
+                if created.project_id:
+                    proj = db.query(models.Project).filter(models.Project.id == created.project_id).first()
+                    if proj:
+                        parts.append(f"Проект: {proj.name}")
+                text = "\n".join(parts)
+                send_message(emp.telegram_chat_id, text)
+    except Exception:
+        pass
+    return created
+
+# --- Telegram webhook (optional) ---
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(update: dict, x_telegram_bot_api_secret_token: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Incoming Telegram updates. Minimal handler to allow users to link their chat with employee.
+    Security: require configured secret token header to match settings.TELEGRAM_WEBHOOK_SECRET.
+    Commands:
+      /start – greeting
+      /link <email> – link this chat to employee by email
+    """
+    from config import settings
+    if settings.TELEGRAM_WEBHOOK_SECRET and (x_telegram_bot_api_secret_token or "") != settings.TELEGRAM_WEBHOOK_SECRET:
+        # ignore silently to avoid probing
+        return {"ok": True}
+    try:
+        msg = (update.get("message") or update.get("edited_message") or {})
+        chat = msg.get("chat") or {}
+        chat_id = str(chat.get("id")) if chat.get("id") is not None else None
+        text = (msg.get("text") or "").strip()
+        if not chat_id:
+            return {"ok": True}
+        if text.startswith("/start"):
+            send_message(chat_id, "Привет! Отправьте <b>/link email@example.com</b>, затем введите пароль от аккаунта — и бот свяжет чат. Пароль будет скрыт.")
+            return {"ok": True}
+        if text.startswith("/link"):
+            parts = text.split()
+            if len(parts) >= 2:
+                email = parts[1].strip()
+                user = crud.get_user_by_email(db, email)
+                emp = db.query(models.Employee).filter(models.Employee.email == email).first()
+                if not user or not emp:
+                    send_message(chat_id, "Пользователь или сотрудник с таким email не найден. Обратитесь к администратору.")
+                    return {"ok": True}
+                _PENDING_LINKS[chat_id] = {"email": email, "ts": datetime.utcnow()}
+                send_message(chat_id, "Введите пароль от аккаунта. Мы попытаемся скрыть это сообщение.")
+                return {"ok": True}
+            else:
+                send_message(chat_id, "Использование: /link email@example.com")
+                return {"ok": True}
+        # Password step
+        if chat_id in _PENDING_LINKS and text:
+            pending = _PENDING_LINKS.pop(chat_id, None)
+            if pending and (datetime.utcnow() - pending.get("ts", datetime.utcnow())).total_seconds() < 600:
+                email = pending["email"]
+                user = crud.get_user_by_email(db, email)
+                if user and crud.verify_password(user, text):
+                    emp = db.query(models.Employee).filter(models.Employee.email == email).first()
+                    if emp:
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(_text("UPDATE employees SET telegram_chat_id = :cid WHERE id = :id"), {"cid": chat_id, "id": emp.id})
+                            mid = msg.get("message_id")
+                            if mid is not None:
+                                try:
+                                    delete_message(chat_id, int(mid))
+                                except Exception:
+                                    pass
+                            send_message(chat_id, f"Чат привязан к сотруднику: <b>{emp.name}</b>.")
+                        except Exception:
+                            pass
+                else:
+                    send_message(chat_id, "Неверный пароль. Повторите /link email и попробуйте снова.")
+            return {"ok": True}
+        return {"ok": True}
+    except Exception:
+        return {"ok": True}
+
+
+# --- Long polling fallback (no webhook) ---
+def _handle_update_dict(update: dict, db: Session):
+    try:
+        msg = (update.get("message") or update.get("edited_message") or {})
+        chat = msg.get("chat") or {}
+        chat_id = str(chat.get("id")) if chat.get("id") is not None else None
+        text = (msg.get("text") or "").strip()
+        if not chat_id:
+            return
+        if text.startswith("/start"):
+            send_message(chat_id, "Привет! Отправьте <b>/link email@example.com</b>, затем введите пароль от аккаунта — и бот свяжет чат. Пароль будет скрыт.")
+            return
+        if text.startswith("/link"):
+            parts = text.split()
+            if len(parts) >= 2:
+                email = parts[1].strip()
+                user = crud.get_user_by_email(db, email)
+                emp = db.query(models.Employee).filter(models.Employee.email == email).first()
+                if not user or not emp:
+                    send_message(chat_id, "Пользователь или сотрудник с таким email не найден. Обратитесь к администратору.")
+                    return
+                _PENDING_LINKS[chat_id] = {"email": email, "ts": datetime.utcnow()}
+                send_message(chat_id, "Введите пароль от аккаунта. Мы попытаемся скрыть это сообщение.")
+                return
+            else:
+                send_message(chat_id, "Использование: /link email@example.com")
+                return
+        # Password step for long polling
+        if chat_id in _PENDING_LINKS and text:
+            pending = _PENDING_LINKS.pop(chat_id, None)
+            if pending and (datetime.utcnow() - pending.get("ts", datetime.utcnow())).total_seconds() < 600:
+                email = pending["email"]
+                user = crud.get_user_by_email(db, email)
+                if user and crud.verify_password(user, text):
+                    emp = db.query(models.Employee).filter(models.Employee.email == email).first()
+                    with engine.begin() as conn:
+                        conn.execute(_text("UPDATE employees SET telegram_chat_id = :cid WHERE id = :id"), {"cid": chat_id, "id": emp.id})
+                    mid = msg.get("message_id")
+                    if mid is not None:
+                        try:
+                            delete_message(chat_id, int(mid))
+                        except Exception:
+                            pass
+                    send_message(chat_id, f"Чат привязан к сотруднику: <b>{emp.name}</b>.")
+                else:
+                    send_message(chat_id, "Неверный пароль. Повторите /link email и попробуйте снова.")
+            return
+    except Exception:
+        pass
+
+
+def _start_telegram_long_polling():
+    import threading
+    import time
+    stop_flag = {"stop": False}
+
+    def worker():
+        last_update_id = None
+        while not stop_flag["stop"]:
+            try:
+                updates = get_updates(offset=(last_update_id + 1) if last_update_id else None, timeout=25)
+                if updates:
+                    db = next(get_db())
+                    try:
+                        for u in updates:
+                            uid = u.get("update_id")
+                            if isinstance(uid, int):
+                                last_update_id = uid
+                            _handle_update_dict(u, db)
+                    finally:
+                        db.close()
+                else:
+                    time.sleep(1)
+            except Exception:
+                time.sleep(3)
+
+    t = threading.Thread(target=worker, name="tg-long-poll", daemon=True)
+    t.start()
+
+# --- Telegram diagnostics (safe, no auth for simplicity in dev) ---
+@app.get("/api/telegram/webhook-info")
+def telegram_webhook_info():
+    info = get_webhook_info()
+    return info or {"ok": False}
+
+@app.post("/api/telegram/set-webhook")
+def telegram_set_webhook():
+    ok = set_webhook()
+    return {"ok": bool(ok)}
+
+@app.post("/api/telegram/delete-webhook")
+def telegram_delete_webhook(drop_pending_updates: bool = True):
+    ok = delete_webhook(drop_pending_updates)
+    return {"ok": bool(ok)}
+
+@app.post("/api/telegram/test-message")
+def telegram_test_message(chat_id: str, text: str = "Проверка связи от бота"):
+    ok = send_message(chat_id, text)
+    return {"ok": bool(ok)}
 
 @app.put("/api/tasks/{task_id}", response_model=schemas.Task)
 def update_task(task_id: str, task: schemas.TaskUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
@@ -417,12 +678,59 @@ def update_task(task_id: str, task: schemas.TaskUpdate, db: Session = Depends(ge
             emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
             if not emp or t.assigned_to != emp.id:
                 raise HTTPException(status_code=403, detail="Forbidden")
-            # restrict fields
-            allowed = schemas.TaskUpdate(hours_spent=task.hours_spent, done=task.done)
+            # restrict fields: allow assigned employee to update hours_spent, done, and work_status (for Kanban moves)
+            allowed = schemas.TaskUpdate(
+                hours_spent=task.hours_spent,
+                done=task.done,
+                work_status=task.work_status,
+            )
             task = allowed
+    # Apply update
     db_task = crud.update_task(db, task_id, task)
     if not db_task:
         raise HTTPException(status_code=404, detail="Task not found")
+    # Handle approval semantics after update
+    try:
+        # Determine actor role and whether approved was explicitly provided
+        is_admin = False
+        has_approved_explicit = False
+        approved_value = None
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ", 1)[1]
+            user = crud.get_user_by_token(db, token)
+            is_admin = bool(user and user.role in ("owner", "admin"))
+        try:
+            payload = task.model_dump(exclude_unset=True)
+            if "approved" in payload:
+                has_approved_explicit = True
+                approved_value = payload.get("approved")
+        except Exception:
+            has_approved_explicit = False
+
+        # Apply approval logic based on done status and explicit approved setting
+        from sqlalchemy import text as _text
+        if has_approved_explicit:
+            # Approved was explicitly set in request - respect it
+            if is_admin and approved_value is True:
+                # Admin explicitly marked approved
+                with engine.begin() as conn:
+                    conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = CURRENT_TIMESTAMP WHERE id = :id"), {"id": task_id})
+            elif approved_value is False:
+                # Explicitly set to false (moving to open/awaiting)
+                with engine.begin() as conn:
+                    conn.execute(_text("UPDATE tasks SET approved = FALSE, approved_at = NULL WHERE id = :id"), {"id": task_id})
+        elif getattr(db_task, "done", False) and not has_approved_explicit:
+            # Done=true but approved not explicitly set - apply default logic
+            if not is_admin:
+                # Non-admin completion -> awaiting approval
+                with engine.begin() as conn:
+                    conn.execute(_text("UPDATE tasks SET approved = FALSE, approved_at = NULL WHERE id = :id"), {"id": task_id})
+        
+        # Refresh task after any approval changes
+        if has_approved_explicit or (getattr(db_task, "done", False) and not has_approved_explicit):
+            db_task = crud.get_task(db, task_id)
+    except Exception:
+        pass
     return db_task
 
 @app.put("/api/tasks/{task_id}/toggle", response_model=schemas.Task)
@@ -439,14 +747,15 @@ def toggle_task(task_id: str, db: Session = Depends(get_db), authorization: Opti
 
     is_admin = bool(user and user.role in ("owner", "admin"))
 
-    # If admin clicks on awaiting (done=true, approved=false) -> approve without flipping done
+    # If admin clicks on awaiting (done=true, approved=false) -> approve and generate finance; do not flip done
     if is_admin and current.done and not (getattr(current, "approved", False) or False):
         try:
             with engine.begin() as conn:
-                conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = NOW() WHERE id = :id"), {"id": task_id})
-            # refresh
-            current = crud.get_task(db, task_id)
-            return current
+                # NOW() for postgres; CURRENT_TIMESTAMP works both
+                conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = CURRENT_TIMESTAMP WHERE id = :id"), {"id": task_id})
+            # generate finance on approval
+            approved = crud.generate_task_finance_if_needed(db, task_id)
+            return approved or crud.get_task(db, task_id)
         except Exception:
             pass
 
@@ -460,7 +769,9 @@ def toggle_task(task_id: str, db: Session = Depends(get_db), authorization: Opti
         if db_task.done:
             if is_admin:
                 with engine.begin() as conn:
-                    conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = NOW() WHERE id = :id"), {"id": task_id})
+                    conn.execute(_text("UPDATE tasks SET approved = TRUE, approved_at = CURRENT_TIMESTAMP WHERE id = :id"), {"id": task_id})
+                # generate finance immediately for admin self-completion
+                crud.generate_task_finance_if_needed(db, task_id)
             else:
                 with engine.begin() as conn:
                     conn.execute(_text("UPDATE tasks SET approved = FALSE, approved_at = NULL WHERE id = :id"), {"id": task_id})
@@ -523,53 +834,88 @@ def delete_goal(goal_id: str, db: Session = Depends(get_db)):
 # Reading Item endpoints
 @app.get("/api/reading", response_model=List[schemas.ReadingItem])
 def get_reading_items(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
-            # вернём только его записи
-            return db.query(models.ReadingItem).filter(models.ReadingItem.user_id == user.id).order_by(models.ReadingItem.added_date.desc()).all()
-    return crud.get_reading_items(db)
+    # Reading list is strictly personal for any role
+    if not authorization or not authorization.startswith("Bearer "):
+        return []
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        return []
+    return (
+        db.query(models.ReadingItem)
+        .filter(models.ReadingItem.user_id == user.id)
+        .order_by(models.ReadingItem.added_date.desc())
+        .all()
+    )
 
 @app.get("/api/reading/{item_id}", response_model=schemas.ReadingItem)
-def get_reading_item(item_id: str, db: Session = Depends(get_db)):
+def get_reading_item(item_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only owner can fetch
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
     item = crud.get_reading_item(db, item_id)
-    if not item:
+    if not item or not user or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Reading item not found")
     return item
 
 @app.post("/api/reading", response_model=schemas.ReadingItem)
 def create_reading_item(item: schemas.ReadingItemCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    uid = None
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        uid = user.id if user else None
-    return crud.create_reading_item(db, item, user_id=uid)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return crud.create_reading_item(db, item, user_id=user.id)
 
 @app.put("/api/reading/{item_id}", response_model=schemas.ReadingItem)
-def update_reading_item(item_id: str, item: schemas.ReadingItemUpdate, db: Session = Depends(get_db)):
-    db_item = crud.update_reading_item(db, item_id, item)
-    if not db_item:
+def update_reading_item(item_id: str, item: schemas.ReadingItemUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Only owner can update
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    existing = crud.get_reading_item(db, item_id)
+    if not existing or not user or existing.user_id != user.id:
         raise HTTPException(status_code=404, detail="Reading item not found")
+    db_item = crud.update_reading_item(db, item_id, item)
     return db_item
 
 @app.put("/api/reading/{item_id}/reading", response_model=schemas.ReadingItem)
-def mark_as_reading(item_id: str, db: Session = Depends(get_db)):
-    db_item = crud.mark_reading_item_as_reading(db, item_id)
-    if not db_item:
+def mark_as_reading(item_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    existing = crud.get_reading_item(db, item_id)
+    if not existing or not user or existing.user_id != user.id:
         raise HTTPException(status_code=404, detail="Reading item not found")
+    db_item = crud.mark_reading_item_as_reading(db, item_id)
     return db_item
 
 @app.put("/api/reading/{item_id}/completed", response_model=schemas.ReadingItem)
-def mark_as_completed(item_id: str, notes: str = None, db: Session = Depends(get_db)):
-    db_item = crud.mark_reading_item_as_completed(db, item_id, notes)
-    if not db_item:
+def mark_as_completed(item_id: str, notes: str = None, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    existing = crud.get_reading_item(db, item_id)
+    if not existing or not user or existing.user_id != user.id:
         raise HTTPException(status_code=404, detail="Reading item not found")
+    db_item = crud.mark_reading_item_as_completed(db, item_id, notes)
     return db_item
 
 @app.delete("/api/reading/{item_id}", response_model=schemas.MessageResponse)
-def delete_reading_item(item_id: str, db: Session = Depends(get_db)):
+def delete_reading_item(item_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    existing = crud.get_reading_item(db, item_id)
+    if not existing or not user or existing.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Reading item not found")
     if crud.delete_reading_item(db, item_id):
         return {"message": "Reading item deleted successfully"}
     raise HTTPException(status_code=404, detail="Reading item not found")
@@ -577,12 +923,19 @@ def delete_reading_item(item_id: str, db: Session = Depends(get_db)):
 # Note endpoints
 @app.get("/api/notes", response_model=List[schemas.Note])
 def get_notes(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
-            return db.query(models.Note).filter(models.Note.user_id == user.id).order_by(models.Note.date.desc()).all()
-    return crud.get_notes(db)
+    # Auth required; show only own notes + shared notes from others (for any role)
+    if not authorization or not authorization.startswith("Bearer "):
+        return []
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        return []
+    return (
+        db.query(models.Note)
+        .filter((models.Note.user_id == user.id) | (models.Note.shared == True))
+        .order_by(models.Note.date.desc())
+        .all()
+    )
 
 @app.get("/api/notes/{note_id}", response_model=schemas.Note)
 def get_note(note_id: str, db: Session = Depends(get_db)):
@@ -593,22 +946,47 @@ def get_note(note_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/notes", response_model=schemas.Note)
 def create_note(note: schemas.NoteCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    uid = None
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        uid = user.id if user else None
-    return crud.create_note(db, note, user_id=uid)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return crud.create_note(db, note, user_id=user.id)
 
 @app.put("/api/notes/{note_id}", response_model=schemas.Note)
-def update_note(note_id: str, note: schemas.NoteUpdate, db: Session = Depends(get_db)):
+def update_note(note_id: str, note: schemas.NoteUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Auth required; only owner can update; admin/owner can change 'shared'
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    n = db.query(models.Note).filter(models.Note.id == note_id).first()
+    if not user or not n:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if user.role not in ("owner", "admin"):
+        if n.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        # Non-admin cannot change shared flag
+        if getattr(note, 'shared', None) is not None:
+            raise HTTPException(status_code=403, detail="Only admin can change share state")
     db_note = crud.update_note(db, note_id, note)
     if not db_note:
         raise HTTPException(status_code=404, detail="Note not found")
     return db_note
 
 @app.delete("/api/notes/{note_id}", response_model=schemas.MessageResponse)
-def delete_note(note_id: str, db: Session = Depends(get_db)):
+def delete_note(note_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Auth required; only owner or admin can delete
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    n = db.query(models.Note).filter(models.Note.id == note_id).first()
+    if not user or not n:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if user.role not in ("owner", "admin") and n.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     if crud.delete_note(db, note_id):
         return {"message": "Note deleted successfully"}
     raise HTTPException(status_code=404, detail="Note not found")
@@ -700,6 +1078,53 @@ def _call_ollama(prompt: str) -> str:
 
     raise HTTPException(status_code=500, detail=f"LLM error: {'; '.join(errors) or 'unknown'}")
 
+def _llm_call_for_user(db: Optional[Session], prompt: str, auth_header: Optional[str]) -> str:
+    """Route to OpenRouter when user profile has a key, else fallback to Ollama."""
+    key: Optional[str] = None
+    try:
+        if db is not None and auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+            user = crud.get_user_by_token(db, token)
+            if user and user.profile and getattr(user.profile, "openrouter_api_key", None):
+                key = user.profile.openrouter_api_key
+    except Exception:
+        key = None
+    if key:
+        try:
+            print(f"[llm] routing: openrouter model={DEFAULT_OPENROUTER_MODEL}")
+            r = requests.post(
+                f"{OPENROUTER_BASE}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "HTTP-Referer": "http://localhost:8000",
+                    "X-Title": "AI Life Dashboard",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": DEFAULT_OPENROUTER_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+                timeout=120,
+            )
+            if r.ok:
+                j = r.json()
+                if isinstance(j, dict) and j.get("choices"):
+                    return j["choices"][0]["message"]["content"]
+            else:
+                try:
+                    print(f"[llm] openrouter error {r.status_code}: {r.text[:200]}")
+                except Exception:
+                    print(f"[llm] openrouter error {r.status_code}")
+        except Exception:
+            print(f"[llm] openrouter exception: {e}")
+        print("[llm] fallback: ollama")
+    else:
+        print("[llm] routing: ollama (no per-user OpenRouter key)")
+    return _call_ollama(prompt)
+
 def _nlg(facts) -> str:
     """Generate a human-friendly short answer from structured facts using the same LLM backend.
     The model is instructed to use ONLY provided facts (no hallucinations). Returns plain text.
@@ -721,32 +1146,63 @@ def _nlg(facts) -> str:
         return ""
 
 def _parse_date(text: str) -> Optional[date]:
+    """Parse common Russian/ISO date expressions without LLM.
+    Supports: сегодня/завтра/послезавтра, "через N дней", dd.mm.yyyy, dd/mm/yyyy,
+    ISO yyyy-mm-dd, yyyy-mm (-> first day), yyyy.
+    """
     t = (text or "").strip().lower()
+    if not t:
+        return None
     today = date.today()
-    if t in ("сегодня", "today"): return today
-    if t in ("завтра", "tomorrow"): return today + timedelta(days=1)
-    if t in ("послезавтра",): return today + timedelta(days=2)
+    if t in ("сегодня", "today"):
+        return today
+    if t in ("завтра", "tomorrow"):
+        return today + timedelta(days=1)
+    if t in ("послезавтра",):
+        return today + timedelta(days=2)
+
     # через N дней
-    try:
-        m = re.search(r"через\s+(\d+)\s+дн", t)
-        if m:
-            return today + timedelta(days=int(m.group(1)))
-    except Exception:
-        pass
-    # dd.mm.yyyy or dd/mm/yyyy
-    for sep in (".", "/"):
+    m = re.search(r"через\s+(\d+)\s+дн", t)
+    if m:
         try:
-            parts = t.split(sep)
-            if len(parts) == 3 and all(parts):
-                d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
-                return date(y, m, d)
+            return today + timedelta(days=int(m.group(1)))
         except Exception:
             pass
-    # ISO-like
+
+    # dd.mm.yyyy or dd/mm/yyyy
+    for sep in (".", "/"):
+        parts = t.split(sep)
+        if len(parts) == 3 and all(parts):
+            try:
+                d, mm, y = int(parts[0]), int(parts[1]), int(parts[2])
+                return date(y, mm, d)
+            except Exception:
+                pass
+
+    # ISO yyyy-mm-dd
     try:
-        return datetime.fromisoformat(t).date()
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", t):
+            return datetime.fromisoformat(t).date()
     except Exception:
-        return None
+        pass
+
+    # yyyy-mm -> first day of month
+    m2 = re.match(r"^(\d{4})-(\d{1,2})$", t)
+    if m2:
+        try:
+            y, mm = int(m2.group(1)), int(m2.group(2))
+            return date(y, mm, 1)
+        except Exception:
+            pass
+
+    # yyyy (year only) -> Jan 1st
+    if re.match(r"^\d{4}$", t):
+        try:
+            return date(int(t), 1, 1)
+        except Exception:
+            pass
+
+    return None
 
 # Simple per-user context (in-memory)
 USER_CTX: dict[str, dict] = {}
@@ -759,11 +1215,11 @@ def _get_user_ctx(uid: Optional[str]) -> dict:
     return USER_CTX[uid]
 
 @app.post("/api/ai/command", response_model=schemas.AIChatResponse)
-def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db)):
+def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
     system = (
         "Ты помощник-оператор. Преобразуй текст пользователя в JSON с полями: "
         "intent (add_task|update_task|toggle_task|delete_task|summary|overdue|finance|"
-        "employee_add|employee_update|employee_status|employee_delete|employee_info|employee_stats|"
+        "employee_add|employee_update|employee_status|employee_delete|employee_info|employee_stats|employee_profit|"
         "project_add|project_info|project_update|project_delete|project_add_member|project_remove_member|project_set_member_rate|project_add_link|project_remove_link|"
         "transaction_add|transaction_update|transaction_delete|"
         "note_add|note_update|note_delete|"
@@ -774,12 +1230,27 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
         "Для project_* используй name, description, tags (list), status, start_date, end_date, employee (для member), hourly_rate (ставка). "
         "Для transaction_* используй transaction_type, amount, date, category, description, employee, project. "
         "Для note_* используй title, date, content, tags. Для reading_* используй title, url, item_type, status, priority, tags, notes. "
-        "Для goal_* используй title, description, period, start_date, end_date, status, progress, tags. Только JSON."
+        "Для goal_* используй title, description, period, start_date, end_date, status, progress, tags. "
+        "Для employee_profit добавь поля name и опционально month (YYYY-MM) или year (YYYY) для периода. Только JSON."
     )
     user = payload.query
     uid = payload.user_id or None
     prompt = f"{system}\nUSER: {user}\nJSON:"
-    raw = _call_ollama(prompt)
+    raw = _llm_call_for_user(db, prompt, authorization)
+    # Persist user prompt if chat_id provided and user resolved
+    try:
+        uid = payload.user_id
+        if not uid and authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ", 1)[1]
+            u = crud.get_user_by_token(db, token)
+            uid = u.id if u else None
+        if uid and payload.chat_id:
+            # ensure session belongs to user
+            s = crud.get_chat_session(db, uid, payload.chat_id)
+            if s:
+                crud.add_chat_message(db, s.id, "user", user)
+    except Exception:
+        pass
     # «Обрезать» возможный текст до JSON
     import json, re
     match = re.search(r"\{[\s\S]*\}", raw)
@@ -792,15 +1263,28 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
     intent = (data.get("intent") or "").lower()
     actions: List[str] = []
     created: List[str] = []
-
     # Handle clear/cleanup and greetings early
     low = user.strip().lower()
     if re.match(r"^(привет|здравств|hi|hello|hey)\b", low):
         # Let free-chat answer handle greetings: return empty actions so UI prefers chat
         return {"result": {"summary": "", "actions": [], "created_task_ids": []}}
     if re.search(r"\b(clear|очисти(ть)?\s+чат|очисти(ть)?\s+контекст)\b", low):
+        # Очистить in-memory контекст
         if payload.user_id:
             USER_CTX.pop(payload.user_id, None)
+        # При наличии chat_id — очистить историю сообщений текущей сессии на сервере
+        try:
+            uid_clear = payload.user_id
+            if not uid_clear and authorization and authorization.startswith("Bearer "):
+                token = authorization.split(" ", 1)[1]
+                u = crud.get_user_by_token(db, token)
+                uid_clear = u.id if u else None
+            if uid_clear and payload.chat_id:
+                s = crud.get_chat_session(db, uid_clear, payload.chat_id)
+                if s:
+                    crud.clear_chat_messages(db, uid_clear, s.id)
+        except Exception:
+            pass
         return {"result": {"summary": "Чат и контекст очищены", "actions": ["Очистка"], "created_task_ids": []}}
 
     # Heuristics
@@ -844,6 +1328,32 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
                     y = int(my.group(1))
                 return f"{y}-{m:02d}"
         return None
+
+    def _extract_year(text: str) -> Optional[int]:
+        try:
+            m = re.search(r"\b(20\d{2})\b", (text or ""))
+            if m:
+                return int(m.group(1))
+        except Exception:
+            pass
+        return None
+
+    def _period_from_query(text: str) -> tuple[Optional[date], Optional[date], Optional[str]]:
+        """Return (start_date, end_date, label) parsed from text by month or year. None means all time."""
+        month = _extract_month_yyyy_mm(text)
+        if month:
+            y, m = month.split("-")
+            y, m = int(y), int(m)
+            start = date(y, m, 1)
+            if m == 12:
+                end = date(y, 12, 31)
+            else:
+                end = date(y, m + 1, 1) - timedelta(days=1)
+            return start, end, f"{y}-{m:02d}"
+        yr = _extract_year(text)
+        if yr:
+            return date(yr, 1, 1), date(yr, 12, 31), str(yr)
+        return None, None, None
 
     def _extract_item_type(text: str) -> Optional[str]:
         t = text.lower()
@@ -928,6 +1438,32 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
             }
             return {"result": {"summary": _nlg(facts) or (f"{emp.name}: выполнено задач {done_count} (часы {hours_done:.0f}), в работе {active_count} (часы {hours_active:.0f}), начислено {total_paid:.2f} руб."), "actions": ["Показана статистика сотрудника"], "created_task_ids": []}}
 
+    if intent == "employee_profit":
+        # Resolve employee
+        name = data.get("name") or data.get("assignee")
+        emp = crud.find_employee_by_name(db, name or "") if name else None
+        if not emp and uid:
+            ctx = _get_user_ctx(uid)
+            last_emp_id = ctx.get("last_employee_id")
+            if last_emp_id:
+                emp = db.query(models.Employee).filter(models.Employee.id == last_emp_id).first()
+        if not emp:
+            return {"result": {"summary": "Сотрудник не найден", "actions": [], "created_task_ids": []}}
+        # Period
+        start, end, label = _period_from_query(user)
+        q = db.query(models.Transaction).filter(models.Transaction.employee_id == emp.id)
+        if start:
+            q = q.filter(models.Transaction.date >= start)
+        if end:
+            q = q.filter(models.Transaction.date <= end)
+        rows = q.all()
+        income = sum(float(tx.amount or 0.0) for tx in rows if (tx.transaction_type or "").lower()=="income")
+        expense = sum(float(tx.amount or 0.0) for tx in rows if (tx.transaction_type or "").lower()=="expense")
+        profit = income - expense
+        lbl = f" за {label}" if label else ""
+        facts = {"action":"employee_profit","name":emp.name,"income":round(income,2),"expense":round(expense,2),"profit":round(profit,2),"period":label}
+        return {"result": {"summary": _nlg(facts) or f"Прибыль{lbl} по {emp.name}: {profit:.2f} руб. (выручка {income:.2f}, затраты {expense:.2f})", "actions": ["Аналитика прибыли сотрудника"], "created_task_ids": []}}
+
     if intent == "add_task":
         content = data.get("content") or payload.query
         priority = (data.get("priority") or _extract_priority(user) or "M").upper()
@@ -948,6 +1484,23 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
                     project_id = p.id
                     break
         task = crud.create_task_simple(db, content=content, priority=priority, due_date=due, assigned_to=assignee_id, project_id=project_id)
+        # Telegram notify if assignee has linked chat
+        try:
+            if task.assigned_to:
+                emp = db.query(models.Employee).filter(models.Employee.id == task.assigned_to).first()
+                if emp and getattr(emp, 'telegram_chat_id', None):
+                    parts = [f"Новая задача: <b>{task.content}</b>"]
+                    if task.due_date:
+                        parts.append(f"Срок: {task.due_date.isoformat()}")
+                    if task.priority:
+                        parts.append(f"Приоритет: {task.priority}")
+                    if task.project_id:
+                        proj = db.query(models.Project).filter(models.Project.id == task.project_id).first()
+                        if proj:
+                            parts.append(f"Проект: {proj.name}")
+                    send_message(emp.telegram_chat_id, "\n".join(parts))
+        except Exception:
+            pass
         actions.append(f"Создана задача: {task.content}")
         created.append(task.id)
         facts = {
@@ -1468,18 +2021,62 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
     # --- Goals ---
     if intent in ("goal_add", "goal_update", "goal_progress", "goal_delete"):
         from schemas import GoalCreate, GoalUpdate
+        # helpers to sanitize LLM outputs
+        def _as_str(v) -> Optional[str]:
+            if v is None:
+                return None
+            if isinstance(v, str):
+                return v
+            if isinstance(v, (int, float)):
+                return str(v)
+            if isinstance(v, list):
+                # join first few scalar parts
+                parts = [str(x) for x in v if isinstance(x, (str, int, float))]
+                return " ".join(parts) if parts else None
+            if isinstance(v, dict):
+                for key in ("title", "name", "text", "value"):
+                    if key in v and isinstance(v[key], (str, int, float)):
+                        return str(v[key])
+                # fallback: first scalar value
+                for x in v.values():
+                    if isinstance(x, (str, int, float)):
+                        return str(x)
+            return None
+        def _as_list_str(v) -> list[str]:
+            if v is None:
+                return []
+            if isinstance(v, list):
+                out = []
+                for x in v:
+                    s = _as_str(x)
+                    if s:
+                        out.append(s)
+                return out
+            s = _as_str(v)
+            return [s] if s else []
         if intent == "goal_add":
             period = data.get("period") or _extract_goal_period(user) or "quarterly"
-            g = crud.create_goal(db, GoalCreate(
-                title=data.get("title") or (data.get("content") or "Цель"),
-                description=data.get("description"),
-                period=period,
-                start_date=_parse_date(str(data.get("start_date") or "")) or _parse_date(user) or date.today(),
-                end_date=_parse_date(str(data.get("end_date") or "")) or date.today(),
-                status=data.get("status") or "active",
-                progress=int(data.get("progress") or 0),
-                tags=data.get("tags") or [],
-            ))
+            title = _as_str(data.get("title")) or _as_str(data.get("content")) or "Цель"
+            description = _as_str(data.get("description"))
+            tags = _as_list_str(data.get("tags"))
+            prog_raw = data.get("progress")
+            try:
+                progress_val = int(prog_raw) if prog_raw not in (None, "", []) else 0
+            except Exception:
+                progress_val = 0
+            try:
+                g = crud.create_goal(db, GoalCreate(
+                    title=title,
+                    description=description,
+                    period=period,
+                    start_date=_parse_date(str(data.get("start_date") or "")) or _parse_date(user) or date.today(),
+                    end_date=_parse_date(str(data.get("end_date") or "")) or date.today(),
+                    status=_as_str(data.get("status")) or "active",
+                    progress=progress_val,
+                    tags=tags,
+                ))
+            except Exception as e:
+                return {"result": {"summary": f"Не удалось создать цель: {e}", "actions": [], "created_task_ids": []}}
             return {"result": {"summary": f"Добавлена цель: {g.title}", "actions": ["Добавлена цель"], "created_task_ids": []}}
         # find by title
         goals = crud.get_goals(db)
@@ -1493,16 +2090,19 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
         if not target:
             return {"result": {"summary": "Цель не найдена", "actions": [], "created_task_ids": []}}
         if intent == "goal_update":
-            crud.update_goal(db, target.id, GoalUpdate(
-                title=data.get("title"),
-                description=data.get("description"),
-                period=data.get("period") or _extract_goal_period(user),
-                start_date=_parse_date(str(data.get("start_date") or "")) or _parse_date(user),
-                end_date=_parse_date(str(data.get("end_date") or "")) or _parse_date(user),
-                status=data.get("status"),
-                progress=int(data.get("progress")) if data.get("progress") is not None else None,
-                tags=data.get("tags"),
-            ))
+            try:
+                crud.update_goal(db, target.id, GoalUpdate(
+                    title=_as_str(data.get("title")),
+                    description=_as_str(data.get("description")),
+                    period=data.get("period") or _extract_goal_period(user),
+                    start_date=_parse_date(str(data.get("start_date") or "")) or _parse_date(user),
+                    end_date=_parse_date(str(data.get("end_date") or "")) or _parse_date(user),
+                    status=_as_str(data.get("status")),
+                    progress=(int(data.get("progress")) if isinstance(data.get("progress"), (int, str)) and str(data.get("progress")).strip() != "" else None),
+                    tags=_as_list_str(data.get("tags")),
+                ))
+            except Exception as e:
+                return {"result": {"summary": f"Не удалось обновить цель: {e}", "actions": [], "created_task_ids": []}}
             return {"result": {"summary": "Цель обновлена", "actions": ["Обновлена цель"], "created_task_ids": []}}
         if intent == "goal_progress":
             try:
@@ -1517,7 +2117,7 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
             crud.delete_goal(db, target.id)
             return {"result": {"summary": "Цель удалена", "actions": ["Удалена цель"], "created_task_ids": []}}
 
-    # Heuristic: employee stats questions without explicit intent (last referenced employee)
+    # Heuristic: employee stats/profit questions without explicit intent (last referenced employee)
     try:
         t = user.lower()
         if re.search(r"сколько\s+задач|итоги\s+задач", t) or re.search(r"сколько\s+час", t) or re.search(r"сколько\s+(денег|получил|начислено)", t):
@@ -1544,17 +2144,112 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db))
                         f"начислено {total_paid:.2f} руб."
                     )
                     return {"result": {"summary": summary, "actions": ["Показана статистика сотрудника (эвристика)"] , "created_task_ids": []}}
+        # Profit heuristic
+        if re.search(r"прибыл|маржин|выручк", t):
+            ctx = _get_user_ctx(payload.user_id) if payload.user_id else {}
+            emp_id = ctx.get("last_employee_id")
+            if emp_id:
+                emp = db.query(models.Employee).filter(models.Employee.id == emp_id).first()
+                if emp:
+                    start, end, label = _period_from_query(user)
+                    q = db.query(models.Transaction).filter(models.Transaction.employee_id == emp.id)
+                    if start: q = q.filter(models.Transaction.date >= start)
+                    if end: q = q.filter(models.Transaction.date <= end)
+                    rows = q.all()
+                    income = sum(float(tx.amount or 0.0) for tx in rows if (tx.transaction_type or "").lower()=="income")
+                    expense = sum(float(tx.amount or 0.0) for tx in rows if (tx.transaction_type or "").lower()=="expense")
+                    profit = income - expense
+                    lbl = f" за {label}" if label else ""
+                    return {"result": {"summary": f"Прибыль{lbl} по {emp.name}: {profit:.2f} руб. (выручка {income:.2f}, затраты {expense:.2f})", "actions": ["Аналитика прибыли сотрудника (эвристика)"] , "created_task_ids": []}}
     except Exception:
         pass
 
     # fallback: просто эхо-ответ
+    # Save assistant summary to chat if available
+    try:
+        uid = payload.user_id
+        if not uid and authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ", 1)[1]
+            user = crud.get_user_by_token(db, token)
+            uid = user.id if user else None
+        if uid and payload.chat_id:
+            s = crud.get_chat_session(db, uid, payload.chat_id)
+            if s:
+                crud.add_chat_message(db, s.id, "assistant", (raw or "").strip()[:4000])
+    except Exception:
+        pass
     return {"result": {"summary": raw.strip()[:800], "actions": [], "created_task_ids": []}}
 
 @app.post("/api/ai/chat", response_model=schemas.MessageResponse)
-def ai_chat(payload: schemas.AICommandRequest):
+def ai_chat(payload: schemas.AICommandRequest, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
     """Свободный чат без JSON-команд. Возвращает обычный текстовый ответ модели."""
-    reply = _call_ollama(payload.query)
+    reply = _llm_call_for_user(db, payload.query, authorization)
+    # persist both user and assistant messages if chat_id provided
+    try:
+        uid = payload.user_id
+        if not uid and authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ", 1)[1]
+            user = crud.get_user_by_token(db, token)
+            uid = user.id if user else None
+        if uid and payload.chat_id:
+            s = crud.get_chat_session(db, uid, payload.chat_id)
+            if s:
+                crud.add_chat_message(db, s.id, "user", payload.query)
+                crud.add_chat_message(db, s.id, "assistant", (reply or "").strip()[:4000])
+    except Exception:
+        pass
     return {"message": (reply or "").strip()[:4000]}
+
+# --- Chat sessions API ---
+from fastapi import Path
+
+def _auth_user(db: Session, authorization: Optional[str]) -> models.User:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
+
+@app.get("/api/chat/sessions", response_model=List[schemas.ChatSessionOut])
+def list_sessions(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    user = _auth_user(db, authorization)
+    return crud.list_chat_sessions(db, user.id)
+
+@app.post("/api/chat/sessions", response_model=schemas.ChatSessionOut)
+def create_session(payload: schemas.ChatSessionCreate, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    user = _auth_user(db, authorization)
+    return crud.create_chat_session(db, user.id, payload.title)
+
+@app.put("/api/chat/sessions/{session_id}", response_model=schemas.ChatSessionOut)
+def rename_session(session_id: str, payload: schemas.ChatSessionUpdate, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    user = _auth_user(db, authorization)
+    s = crud.rename_chat_session(db, user.id, session_id, (payload.title or None))
+    if not s:
+        raise HTTPException(status_code=404, detail="Not found")
+    return s
+
+@app.delete("/api/chat/sessions/{session_id}", response_model=schemas.MessageResponse)
+def remove_session(session_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    user = _auth_user(db, authorization)
+    ok = crud.delete_chat_session(db, user.id, session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"message": "Deleted"}
+
+@app.get("/api/chat/sessions/{session_id}/messages", response_model=List[schemas.ChatMessageOut])
+def list_messages(session_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    user = _auth_user(db, authorization)
+    return crud.list_chat_messages(db, user.id, session_id)
+
+@app.delete("/api/chat/sessions/{session_id}/messages", response_model=schemas.MessageResponse)
+def clear_messages(session_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    user = _auth_user(db, authorization)
+    ok = crud.clear_chat_messages(db, user.id, session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"message": "Cleared"}
 
 if __name__ == "__main__":
     import uvicorn

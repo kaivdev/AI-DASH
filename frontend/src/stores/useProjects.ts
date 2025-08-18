@@ -14,6 +14,7 @@ interface ProjectsState {
 	removeLink: (projectId: string, linkId: string) => Promise<void>
 	addMember: (projectId: string, employeeId: string) => Promise<void>
 	removeMember: (projectId: string, employeeId: string) => Promise<void>
+	setMemberRates: (projectId: string, employeeId: string, p: { cost_hourly_rate?: number|null, bill_hourly_rate?: number|null }) => Promise<void>
 }
 
 function generateId() {
@@ -99,6 +100,17 @@ export const useProjects = create<ProjectsState>()(
 				try { await projectApi.removeMember(projectId, employeeId) } catch {}
 				set((state) => ({
 					projects: state.projects.map((p: any) => p.id === projectId ? { ...p, member_ids: (p.member_ids ?? []).filter((id: string) => id !== employeeId) } : p)
+				}))
+			},
+			setMemberRates: async (projectId, employeeId, p) => {
+				try { await projectApi.setMemberRates(projectId, employeeId, p) } catch {}
+				set((state) => ({
+					projects: state.projects.map((proj: any) => {
+						if (proj.id !== projectId) return proj
+						const nextCost = { ...(proj.member_cost_rates || {}), [employeeId]: p.cost_hourly_rate ?? null }
+						const nextBill = { ...(proj.member_bill_rates || {}), [employeeId]: p.bill_hourly_rate ?? null }
+						return { ...proj, member_cost_rates: nextCost, member_bill_rates: nextBill }
+					})
 				}))
 			}
 		}),

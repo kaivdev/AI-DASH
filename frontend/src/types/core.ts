@@ -1,11 +1,15 @@
 export type Priority = 'L' | 'M' | 'H'
 
+// Task work status (stored in backend)
+export type TaskWorkStatus = 'in_progress' | 'paused'
+
 export interface Note {
   id: string
   date: string
   title?: string
   content: string
   tags: string[]
+  shared?: boolean
   created_at: string
   updated_at?: string
 }
@@ -20,10 +24,14 @@ export interface Task {
   project_id?: string // renamed from projectId
   hours_spent: number
   billable: boolean
-  hourly_rate_override?: number
-  applied_hourly_rate?: number
+  cost_rate_override?: number
+  bill_rate_override?: number
+  applied_cost_rate?: number
+  applied_bill_rate?: number
   approved?: boolean
   approved_at?: string
+  // work status (backend field) - can be null when task is completed
+  work_status?: TaskWorkStatus | null
   created_at: string
   updated_at?: string
 }
@@ -39,6 +47,8 @@ export interface Transaction {
   description?: string
   tags: string[]
   employee_id?: string // renamed from employeeId
+  project_id?: string
+  task_id?: string
   created_at: string
   updated_at?: string
 }
@@ -54,6 +64,8 @@ export interface Employee {
   status_tag?: string // renamed from statusTag
   status_date: string // renamed from statusDate
   hourly_rate?: number
+  cost_hourly_rate?: number
+  bill_hourly_rate?: number
   created_at: string
   updated_at?: string
 }

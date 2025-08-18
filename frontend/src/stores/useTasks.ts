@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { Task, Priority } from '@/types/core'
+import type { Task, Priority, TaskWorkStatus } from '@/types/core'
 import { taskApi } from '@/lib/api'
 
 interface TasksState {
@@ -12,6 +12,8 @@ interface TasksState {
   toggle: (id: string) => Promise<void>
   update: (id: string, patch: Partial<Omit<Task, 'id' | 'created_at' | 'updated_at'>>) => Promise<void>
   remove: (id: string) => Promise<void>
+  // work status setter (goes to backend)
+  setWorkStatus: (id: string, status: TaskWorkStatus | undefined) => Promise<void>
 }
 
 function generateId() {
@@ -31,8 +33,14 @@ function migrateTasks(raw: any): Task[] {
       project_id: t.projectId ?? t.project_id ?? undefined,
       hours_spent: typeof t.hours_spent === 'number' ? t.hours_spent : 0,
       billable: typeof t.billable === 'boolean' ? t.billable : true,
-      hourly_rate_override: typeof t.hourly_rate_override === 'number' ? t.hourly_rate_override : undefined,
-      applied_hourly_rate: typeof t.applied_hourly_rate === 'number' ? t.applied_hourly_rate : undefined,
+  // legacy hourly_rate_override dropped
+  cost_rate_override: typeof (t as any).cost_rate_override === 'number' ? (t as any).cost_rate_override : undefined,
+  bill_rate_override: typeof (t as any).bill_rate_override === 'number' ? (t as any).bill_rate_override : undefined,
+  applied_cost_rate: typeof (t as any).applied_cost_rate === 'number' ? (t as any).applied_cost_rate : undefined,
+  applied_bill_rate: typeof (t as any).applied_bill_rate === 'number' ? (t as any).applied_bill_rate : undefined,
+  // preserve any saved work status, migrate from old local_status
+  work_status: (t as any).work_status || (t as any).local_status || undefined,
+  // legacy applied_hourly_rate dropped
       created_at: t.created_at ?? new Date().toISOString(),
       updated_at: t.updated_at ?? new Date().toISOString(),
     }))
@@ -46,6 +54,7 @@ const seed: Task[] = [
     done: true,
     hours_spent: 0,
     billable: true,
+    work_status: 'in_progress',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -56,6 +65,7 @@ const seed: Task[] = [
     done: false,
     hours_spent: 0,
     billable: true,
+    work_status: 'paused',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -99,7 +109,7 @@ export const useTasks = create<TasksState>()(
       add: async (task) => {
         set({ loading: true, error: null })
         try {
-                     const apiData = {
+         const apiData = {
              content: task.content,
              priority: task.priority,
              due_date: task.due_date || null,
@@ -108,7 +118,9 @@ export const useTasks = create<TasksState>()(
              project_id: task.project_id || null,
              hours_spent: typeof task.hours_spent === 'number' ? task.hours_spent : 0,
              billable: typeof task.billable === 'boolean' ? task.billable : true,
-             hourly_rate_override: task.hourly_rate_override ?? null,
+       cost_rate_override: (task as any).cost_rate_override ?? null,
+       bill_rate_override: (task as any).bill_rate_override ?? null,
+       work_status: (task as any).work_status ?? null,
            }
           
           const newTask = await taskApi.create(apiData) as Task
@@ -138,6 +150,11 @@ export const useTasks = create<TasksState>()(
         set({ loading: true, error: null })
         try {
           const updatedTask = await taskApi.toggle(id) as Task
+          // Если задача стала выполненной, очищаем work_status
+          if (updatedTask.done && updatedTask.work_status) {
+            await taskApi.update(id, { work_status: null })
+            updatedTask.work_status = null
+          }
           set((state) => ({
             tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
             loading: false
@@ -145,7 +162,12 @@ export const useTasks = create<TasksState>()(
         } catch (error) {
           console.error('Failed to toggle task:', error)
           set((state) => ({
-            tasks: state.tasks.map((t) => (t.id === id ? { ...t, done: !t.done, updated_at: new Date().toISOString() } : t)),
+            tasks: state.tasks.map((t) => (t.id === id ? { 
+              ...t, 
+              done: !t.done, 
+              work_status: !t.done ? null : t.work_status, // Очищаем статус при завершении
+              updated_at: new Date().toISOString() 
+            } : t)),
             loading: false,
             error: 'Updated locally (API unavailable)'
           }))
@@ -155,7 +177,7 @@ export const useTasks = create<TasksState>()(
       update: async (id, patch) => {
         set({ loading: true, error: null })
         try {
-                     const updatedTask = await taskApi.update(id, patch as any) as Task
+          const updatedTask = await taskApi.update(id, patch as any) as Task
           set((state) => ({
             tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
             loading: false
@@ -184,6 +206,24 @@ export const useTasks = create<TasksState>()(
             tasks: state.tasks.filter((t) => t.id !== id),
             loading: false,
             error: 'Deleted locally (API unavailable)'
+          }))
+        }
+      },
+
+      setWorkStatus: async (id, status) => {
+        set({ loading: true, error: null })
+        try {
+          const updatedTask = await taskApi.update(id, { work_status: status }) as Task
+          set((state) => ({
+            tasks: state.tasks.map(t => t.id === id ? updatedTask : t),
+            loading: false
+          }))
+        } catch (error) {
+          console.error('Failed to update work status:', error)
+          set((state) => ({
+            tasks: state.tasks.map(t => t.id === id ? { ...t, work_status: status, updated_at: new Date().toISOString() } : t),
+            loading: false,
+            error: 'Updated locally (API unavailable)'
           }))
         }
       }

@@ -73,7 +73,9 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
       setShow(true)
       const prev = document.body.style.overflow
       document.body.style.overflow = 'hidden'
-      return () => { document.body.style.overflow = prev }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+  document.addEventListener('keydown', onKey)
+  return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey) }
     } else {
       const t = setTimeout(() => setShow(false), 200)
       return () => clearTimeout(t)

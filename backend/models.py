@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 from typing import List
+from uuid import uuid4
 
 class Employee(Base):
     __tablename__ = "employees"
@@ -11,6 +12,8 @@ class Employee(Base):
     name = Column(String, nullable=False)
     position = Column(String, nullable=False)
     email = Column(String, nullable=True)
+    # Telegram private chat id for bot notifications (string to be db-agnostic)
+    telegram_chat_id = Column(String, nullable=True)
     salary = Column(Float, nullable=True)
     revenue = Column(Float, nullable=True)
     current_status = Column(String, nullable=False)
@@ -18,15 +21,23 @@ class Employee(Base):
     status_date = Column(Date, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    # New: hourly rate in RUB (integer, no kopecks)
+    # Legacy: single hourly rate in RUB (integer, no kopecks)
     hourly_rate = Column(Integer, nullable=True)
+    # New: separate rates
+    cost_hourly_rate = Column(Integer, nullable=True)  # фактическая стоимость часа сотрудника
+    bill_hourly_rate = Column(Integer, nullable=True)  # сколько берем с клиента за час
     # Link to app user (optional, unique per user)
     user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=True)
     
     # Relationships
     transactions = relationship("Transaction", back_populates="employee")
     tasks = relationship("Task", back_populates="assigned_employee")
-    project_memberships = relationship("ProjectMember", back_populates="employee")
+    # Delete project membership rows when employee is deleted to avoid FK NULL updates
+    project_memberships = relationship(
+        "ProjectMember",
+        back_populates="employee",
+        cascade="all, delete-orphan",
+    )
 
 class Project(Base):
     __tablename__ = "projects"
@@ -66,8 +77,11 @@ class ProjectMember(Base):
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     employee_id = Column(String, ForeignKey("employees.id"), nullable=False)
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
-    # New: project-specific hourly rate (RUB)
+    # Legacy: project-specific hourly rate (treated as BILL rate)
     hourly_rate = Column(Integer, nullable=True)
+    # New separate rates per project member
+    cost_hourly_rate = Column(Integer, nullable=True)
+    bill_hourly_rate = Column(Integer, nullable=True)
     
     __table_args__ = (
         UniqueConstraint("project_id", "employee_id", name="uq_project_members_pair"),
@@ -89,6 +103,7 @@ class Transaction(Base):
     tags = Column(JSON, default=list)
     employee_id = Column(String, ForeignKey("employees.id"), nullable=True)
     project_id = Column(String, ForeignKey("projects.id"), nullable=True)
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -110,11 +125,23 @@ class Task(Base):
     # New: time tracking and rates
     hours_spent = Column(Float, nullable=False, default=0.0)
     billable = Column(Boolean, nullable=False, default=True)
+    # Legacy single override
     hourly_rate_override = Column(Integer, nullable=True)
+    # New separate overrides
+    cost_rate_override = Column(Integer, nullable=True)
+    bill_rate_override = Column(Integer, nullable=True)
     applied_hourly_rate = Column(Integer, nullable=True)
+    # New: separate applied rates for audit
+    applied_cost_rate = Column(Integer, nullable=True)
+    applied_bill_rate = Column(Integer, nullable=True)
     # New: admin approval for completion
     approved = Column(Boolean, nullable=False, default=False)
     approved_at = Column(DateTime(timezone=True), nullable=True)
+    # New: work status for employees
+    work_status = Column(String, nullable=True)  # in_progress, paused
+    # Link created finance transactions
+    income_tx_id = Column(String, nullable=True)
+    expense_tx_id = Column(String, nullable=True)
     
     # Relationships
     assigned_employee = relationship("Employee", back_populates="tasks")
@@ -164,6 +191,8 @@ class Note(Base):
     title = Column(String, nullable=True)
     content = Column(Text, nullable=False)
     tags = Column(JSON, default=list)
+    # Share with all employees
+    shared = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     # Owner user id (scoping)
@@ -199,6 +228,8 @@ class UserProfile(Base):
     twitter = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
     locale = Column(String, nullable=True)
+    # Per-user OpenRouter API key (secret); not returned in API responses
+    openrouter_api_key = Column(String, nullable=True)
 
     user = relationship("User", back_populates="profile")
 
@@ -216,3 +247,26 @@ class Session(Base):
     token = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+
+# --- Chat models ---
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id = Column(String, primary_key=True)  # uuid
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(String, primary_key=True)  # uuid
+    session_id = Column(String, ForeignKey("chat_sessions.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # 'user' | 'assistant'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("ChatSession", back_populates="messages") 

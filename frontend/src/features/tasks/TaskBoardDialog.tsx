@@ -19,9 +19,10 @@ interface TaskBoardDialogProps {
   onAdd: (data: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => Promise<void>
   initialProjectId?: string
   initialStatus?: 'active' | 'done' | 'all'
+  isAdmin?: boolean
 }
 
-export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onOpenDetail, onStartEdit, onToggle, onDelete, onAdd, initialProjectId, initialStatus }: TaskBoardDialogProps) {
+export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onOpenDetail, onStartEdit, onToggle, onDelete, onAdd, initialProjectId, initialStatus, isAdmin }: TaskBoardDialogProps) {
   const [show, setShow] = useState(false)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<'all' | Priority>('all')
@@ -46,7 +47,9 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
       setShow(true)
       const prev = document.body.style.overflow
       document.body.style.overflow = 'hidden'
-      return () => { document.body.style.overflow = prev }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+  document.addEventListener('keydown', onKey)
+  return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey) }
     } else {
       const t = setTimeout(() => setShow(false), 200)
       return () => clearTimeout(t)
@@ -100,6 +103,7 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
   }
 
   async function onQuickAdd() {
+    if (!isAdmin) return
     if (!newContent.trim()) return
     await onAdd({
       content: newContent.trim(),
@@ -133,7 +137,8 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
           </div>
 
           <div className="p-5 space-y-4 overflow-auto">
-            {/* Quick add block */}
+            {/* Quick add block (admin only) */}
+            {isAdmin && (
             <div className="p-3 border rounded bg-muted/10">
               <div className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
                 <input
@@ -169,6 +174,7 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
                 </div>
               </div>
             </div>
+            )}
 
             {/* Filters block */}
             <div className="p-3 border rounded bg-muted/5">

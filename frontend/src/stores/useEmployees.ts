@@ -74,13 +74,15 @@ export const useEmployees = create<EmployeesState>()(
       add: async (employee) => {
         set({ loading: true, error: null })
         try {
-                     const apiData = {
+         const apiData = {
              name: employee.name,
              position: employee.position,
              email: employee.email || null,
              salary: employee.salary || null,
              revenue: employee.revenue || null,
              hourly_rate: (employee as any).hourly_rate || null,
+       cost_hourly_rate: (employee as any).cost_hourly_rate || null,
+       bill_hourly_rate: (employee as any).bill_hourly_rate || null,
              current_status: employee.current_status,
              status_tag: employee.status_tag || null,
              status_date: employee.status_date
