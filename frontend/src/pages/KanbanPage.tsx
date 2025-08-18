@@ -26,7 +26,7 @@ import { KanbanColumn } from '@/features/tasks/KanbanColumn'
 import { KanbanCard } from '@/features/tasks/KanbanCard'
 import { TaskDetailDialog } from '@/features/tasks/TaskDetailDialog'
 import { TaskFormDialog } from '@/features/tasks/TaskFormDialog'
-import { Plus, ArrowLeft, Settings, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, Settings } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 /**
@@ -144,6 +144,8 @@ export function KanbanPage() {
   // Запоминаем последнюю колонку, над которой был курсор во время DnD (для случаев, когда over.id === active.id)
   const lastOverColumnRef = useRef<KanbanStatus | null>(null)
   const lastOverTaskIdRef = useRef<string | null>(null)
+  // Оптимистичные статусы во время DnD, чтобы избежать визуальной задержки
+  const [optimisticStatus, setOptimisticStatus] = useState<Record<string, KanbanStatus>>({})
 
   // Локальный порядок задач в колонках
   const [orderMap, setOrderMap] = useState<Record<KanbanStatus, string[]>>({
@@ -163,21 +165,31 @@ export function KanbanPage() {
     })
   )
 
-  // Кастомная стратегия коллизий: предпочитаем колонки и игнорируем сам элемент
+  // Кастомная стратегия коллизий: предпочитаем карточки задач, колонки — фоллбек
   const collisionDetection: CollisionDetection = (args) => {
-    // Сначала ищем цели под указателем
+    // 1) Пытаемся найти цели под курсором
     let collisions = pointerWithin(args)
     if (!collisions.length) {
-      // Фоллбек — ближайшие углы
+      // 2) Фоллбек — ближайшие углы, когда курсор вне областей
       collisions = closestCorners(args)
     }
-    // Убираем сам перетаскиваемый элемент из списка целей
+
+    // Убираем сам перетаскиваемый элемент
     const filtered = collisions.filter(c => c.id !== args.active.id)
     if (!filtered.length) return filtered
-    // Предпочитаем колонки, если они есть среди целей
-  const columnIds = new Set<KanbanStatus>(kanbanColumns.map(c => c.id))
-  const columns = filtered.filter(c => columnIds.has(String(c.id) as KanbanStatus))
-    return columns.length ? columns : filtered
+
+    // Предпочитаем совпадения по карточкам задач
+    const taskIdSet = new Set(tasks.map(t => t.id))
+    const taskHits = filtered.filter(c => taskIdSet.has(String(c.id)))
+    if (taskHits.length) return taskHits
+
+    // Если карточек нет под указателем — допускаем колонки
+    const columnIds = new Set<KanbanStatus>(kanbanColumns.map(c => c.id))
+    const columnHits = filtered.filter(c => columnIds.has(String(c.id) as KanbanStatus))
+    if (columnHits.length) return columnHits
+
+    // В остальных случаях вернем что есть
+    return filtered
   }
   
   // Группировка задач по статусам Kanban
@@ -191,7 +203,8 @@ export function KanbanPage() {
     }
     
     for (const task of tasks) {
-      const status = getTaskKanbanStatus(task)
+      // Используем оптимистичный статус, если он установлен
+      const status = optimisticStatus[task.id] ?? getTaskKanbanStatus(task)
       grouped[status].push(task)
     }
     
@@ -209,7 +222,7 @@ export function KanbanPage() {
     })
     
     return grouped
-  }, [tasks, orderMap])
+  }, [tasks, orderMap, optimisticStatus])
 
   // Синхронизация orderMap при изменении задач: добавляем новые id в конец своих колонок, удаляем отсутствующие
   useEffect(() => {
@@ -314,27 +327,39 @@ export function KanbanPage() {
       taskContent: task.content
     })
     
-    if (currentStatus === newStatus) {
+  if (currentStatus === newStatus) {
       // Перемещение в пределах одной колонки (reorder)
-      const withinIds = orderMap[newStatus] || tasksByStatus[newStatus].map(t => t.id)
-      const oldIndex = withinIds.indexOf(taskId)
-      let newIndex = oldIndex
+      const base = (orderMap[newStatus] && orderMap[newStatus].length ? orderMap[newStatus] : tasksByStatus[newStatus].map(t => t.id))
       const overTaskId = (over && tasks.some(t => t.id === over.id)) ? String(over.id) : lastOverTaskIdRef.current
-      if (overTaskId && overTaskId !== taskId) {
-        const overIndex = withinIds.indexOf(overTaskId)
-        if (overIndex >= 0) newIndex = overIndex
-      } else if (!overTaskId) {
-        // если бросили на колонку — переносим в конец
-        newIndex = withinIds.length - 1
-      }
-      if (oldIndex >= 0 && newIndex >= 0 && oldIndex !== newIndex) {
-        const next = [...withinIds]
-        const [moved] = next.splice(oldIndex, 1)
-        next.splice(newIndex, 0, moved)
+
+      // Если нет валидной цели — считаем, что бросили на колонку => в конец
+      if (!overTaskId || overTaskId === taskId) {
+        const filtered = base.filter(id => id !== taskId)
+        const next = [...filtered, taskId]
         setOrderMap((prev) => ({ ...prev, [newStatus]: next }))
-      } else {
-        console.log('Task already in target column, no update needed')
+        return
       }
+
+      // Считаем позицию вставки относительно середины целевой карточки
+      const filtered = base.filter(id => id !== taskId)
+      const overIdxInFiltered = filtered.indexOf(overTaskId)
+      if (overIdxInFiltered === -1) {
+        const next = [...filtered, taskId]
+        setOrderMap((prev) => ({ ...prev, [newStatus]: next }))
+        return
+      }
+
+      // Определяем вставку до/после по положению активной карточки
+      // Используем прямоугольники, если доступны; иначе вставляем до
+  const aRectTop = (event.active.rect as any)?.current?.translated?.top ?? (event.active.rect as any)?.current?.top
+  const oRect = (over as any)?.rect as any
+      const overMidY = oRect?.top != null && oRect?.height != null ? (oRect.top + oRect.height / 2) : null
+      const insertAfter = overMidY != null && aRectTop != null ? aRectTop > overMidY : false
+      const insertIndex = overIdxInFiltered + (insertAfter ? 1 : 0)
+
+      const next = [...filtered]
+      next.splice(insertIndex, 0, taskId)
+      setOrderMap((prev) => ({ ...prev, [newStatus]: next }))
       return
     }
     
@@ -346,30 +371,68 @@ export function KanbanPage() {
     }
     
     console.log(`Moving task ${taskId} from ${currentStatus} to ${newStatus}`)
-    
-  // Обновляем задачу в соответствии с новым статусом
-  const updates = updateTaskFromKanbanStatus(task, newStatus)
-    
+
+    // Обновляем задачу в соответствии с новым статусом
+    const updates = updateTaskFromKanbanStatus(task, newStatus)
+
     if (Object.keys(updates).length === 0) {
       console.error('No updates generated for status transition')
       return
     }
-    
-    console.log('Applying updates:', updates)
-    
+
+    console.log('Applying updates (optimistic UI):', updates)
+
+  // Сохраним предыдущий порядок для возможного отката
+  const prevSrc = (orderMap[currentStatus] && orderMap[currentStatus].length ? orderMap[currentStatus] : tasksByStatus[currentStatus].map(t => t.id))
+  const prevDst = (orderMap[newStatus] && orderMap[newStatus].length ? orderMap[newStatus] : tasksByStatus[newStatus].map(t => t.id))
+
+    // Оптимистично переносим карточку сразу в UI
+    setOptimisticStatus(prev => ({ ...prev, [taskId]: newStatus }))
+    setOrderMap((prev) => {
+      const nextSrc = prevSrc.filter(id => id !== taskId)
+      const nextDstBase = prevDst.filter(id => id !== taskId)
+
+      // Определяем, на какую карточку навели в целевой колонке
+      const overTaskId = (over && tasks.some(t => t.id === over.id)) ? String(over.id) : lastOverTaskIdRef.current
+      if (!overTaskId) {
+        // Бросили на колонку — добавляем в конец
+        return { ...prev, [currentStatus]: nextSrc, [newStatus]: [...nextDstBase, taskId] }
+      }
+
+      const overIdx = nextDstBase.indexOf(overTaskId)
+      if (overIdx === -1) {
+        // На всякий случай — если целевая карточка не в списке (рассинхрон)
+        return { ...prev, [currentStatus]: nextSrc, [newStatus]: [...nextDstBase, taskId] }
+      }
+
+      // Вставка до/после в целевой колонке
+  const aRectTop = (event.active.rect as any)?.current?.translated?.top ?? (event.active.rect as any)?.current?.top
+  const oRect = (over as any)?.rect as any
+      const overMidY = oRect?.top != null && oRect?.height != null ? (oRect.top + oRect.height / 2) : null
+      const insertAfter = overMidY != null && aRectTop != null ? aRectTop > overMidY : false
+      const insertIndex = overIdx + (insertAfter ? 1 : 0)
+
+      const nextDst = [...nextDstBase]
+      nextDst.splice(insertIndex, 0, taskId)
+      return { ...prev, [currentStatus]: nextSrc, [newStatus]: nextDst }
+    })
+
     try {
       await updateTask(taskId, updates)
       console.log('Task updated successfully')
-      // Обновим порядок: удалим из старой колонки и вставим в целевую (в начало списка)
-      setOrderMap((prev) => {
-        const src = (prev[currentStatus] && prev[currentStatus].length ? prev[currentStatus] : tasksByStatus[currentStatus].map(t => t.id))
-        const dst = (prev[newStatus] && prev[newStatus].length ? prev[newStatus] : tasksByStatus[newStatus].map(t => t.id))
-        const nextSrc = src.filter(id => id !== taskId)
-        const nextDst = [taskId, ...dst.filter(id => id !== taskId)]
-        return { ...prev, [currentStatus]: nextSrc, [newStatus]: nextDst }
+      // Убираем оптимистичный оверрайд — задача уже обновлена на сервере
+      setOptimisticStatus(prev => {
+        const { [taskId]: _, ...rest } = prev
+        return rest
       })
     } catch (error) {
       console.error('Failed to update task status:', error)
+      // Откатим изменения в UI
+      setOptimisticStatus(prev => {
+        const { [taskId]: _, ...rest } = prev
+        return rest
+      })
+      setOrderMap((prev) => ({ ...prev, [currentStatus]: prevSrc, [newStatus]: prevDst }))
     } finally {
       // Сбрасываем запомненную колонку после завершения DnD
       lastOverColumnRef.current = null
@@ -389,11 +452,7 @@ export function KanbanPage() {
     setFormOpen(true)
   }
   
-  // Создание новой задачи
-  function createTask() {
-    setEditingTask(null)
-    setFormOpen(true)
-  }
+  // Создание новой задачи отключено на этой странице
   
   // Функции управления колонками
   function toggleColumnVisibility(columnId: KanbanStatus) {
@@ -437,8 +496,8 @@ export function KanbanPage() {
   return (
     <div className="h-full flex flex-col">
       {/* Заголовок страницы */}
-      <div className="flex items-center justify-between p-6 border-b bg-background">
-        <div className="flex items-center gap-4">
+  <div className="flex items-center justify-between px-3 py-1 border-b bg-background">
+        <div className="flex items-center gap-2">
           <Link 
             to="/" 
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
@@ -446,7 +505,6 @@ export function KanbanPage() {
             <ArrowLeft className="h-4 w-4" />
             Назад к дашборду
           </Link>
-          <h1 className="text-2xl font-semibold">Kanban Board</h1>
         </div>
         
         <div className="flex items-center gap-3">
@@ -509,20 +567,11 @@ export function KanbanPage() {
             )}
           </div>
           
-          {isAdmin && (
-            <button
-              onClick={createTask}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
-            >
-              <Plus className="h-4 w-4" />
-              Добавить задачу
-            </button>
-          )}
         </div>
       </div>
       
       {/* Kanban Board */}
-      <div className="flex-1 p-6 overflow-auto">
+  <div className="flex-1 p-3 overflow-auto">
         <DndContext
           sensors={sensors}
           collisionDetection={collisionDetection}
