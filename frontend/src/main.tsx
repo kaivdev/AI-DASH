@@ -6,6 +6,17 @@ import { BrowserRouter } from 'react-router-dom'
 import { useSettings } from './stores/useSettings'
 import 'antd/dist/reset.css'
 import { ConfigProvider, theme as antdTheme } from 'antd'
+// Gravity UI styles for Markdown Editor
+import '@gravity-ui/uikit/styles/fonts.css'
+import '@gravity-ui/uikit/styles/styles.css'
+import {ThemeProvider, configure, ToasterProvider, Toaster as GToaster, ToasterComponent} from '@gravity-ui/uikit'
+import {configure as configureMd} from '@gravity-ui/markdown-editor'
+
+configure({ lang: 'ru' })
+configureMd({ lang: 'ru' })
+
+// Gravity UI Toaster instance for Markdown Editor notifications
+const toaster = new GToaster()
 
 function ThemeApplier({ children }: { children: React.ReactNode }) {
   const theme = useSettings((s) => s.theme)
@@ -16,7 +27,12 @@ function ThemeApplier({ children }: { children: React.ReactNode }) {
   }, [theme])
   return (
     <ConfigProvider theme={{ algorithm: theme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm }}>
-      {children}
+      <ToasterProvider toaster={toaster}>
+        <ThemeProvider theme={theme === 'dark' ? 'dark' : 'light'}>
+          {children}
+          <ToasterComponent />
+        </ThemeProvider>
+      </ToasterProvider>
     </ConfigProvider>
   )
 }
