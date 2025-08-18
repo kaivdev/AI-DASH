@@ -186,22 +186,105 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   }
 
   function exportCSV() {
-    const header = ['date','type','amount','category','tags','employee','description']
-    const rows = filtered.map((t) => [
-      t.date,
-      (t as any).transaction_type,
-      String(t.amount),
-      t.category || '',
-      (Array.isArray((t as any).tags) ? (t as any).tags : []).join('|'),
-      (t as any).employee_id || '',
-      t.description || ''
-    ])
-    const csv = [header, ...rows].map(r => r.map((x)=>`"${String(x).split('"').join('""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    // Build a full CSV with all known transaction fields and a UTF-8 BOM for Excel compatibility
+    const header = [
+      'id',
+      'date',
+      'type',
+      'amount',
+      'category',
+      'description',
+      'tags',
+      'employee_id',
+      'employee',
+      'project_id',
+      'project',
+      'task_id',
+      'created_at',
+      'updated_at',
+    ]
+    const rows = filtered.map((t) => {
+      const employeeId = (t as any).employee_id || ''
+      const projectId = (t as any).project_id || ''
+      const employee = employeeId ? employees.find(e => e.id === employeeId)?.name || '' : ''
+      const project = projectId ? projects.find(p => p.id === projectId)?.name || '' : ''
+      const tagsArray = Array.isArray((t as any).tags) ? (t as any).tags : []
+      return [
+        t.id,
+        t.date,
+        (t as any).transaction_type,
+        String(t.amount),
+        t.category || '',
+        t.description || '',
+        tagsArray.join('|'),
+        employeeId,
+        employee,
+        projectId,
+        project,
+        (t as any).task_id || '',
+        (t as any).created_at || '',
+        (t as any).updated_at || '',
+      ]
+    })
+  const escapeCSV = (x: unknown) => `"${String(x ?? '').replace(/"/g, '""')}"`
+  // Use CRLF for Windows-friendly newlines
+  const csvBody = [header, ...rows].map(r => r.map(escapeCSV).join(',')).join('\r\n')
+  // Hint Excel to use comma as a separator on RU locales
+  const sepDirective = 'sep=,\r\n'
+  const content = sepDirective + csvBody
+  // Encode as UTF-16LE with BOM for stable Cyrillic decoding in Excel
+  const u16 = new Uint16Array(content.length + 1)
+  u16[0] = 0xFEFF
+  for (let i = 0; i < content.length; i++) u16[i + 1] = content.charCodeAt(i)
+  const blob = new Blob([u16], { type: 'text/csv;charset=utf-16le;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `finance_${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function exportXLSX() {
+    const header = [
+      'id','date','type','amount','category','description','tags','employee_id','employee','project_id','project','task_id','created_at','updated_at'
+    ] as const
+    const rows = filtered.map((t) => {
+      const employeeId = (t as any).employee_id || ''
+      const projectId = (t as any).project_id || ''
+      const employee = employeeId ? employees.find(e => e.id === employeeId)?.name || '' : ''
+      const project = projectId ? projects.find(p => p.id === projectId)?.name || '' : ''
+      const tagsArray = Array.isArray((t as any).tags) ? (t as any).tags : []
+      return {
+        id: t.id,
+        date: t.date,
+        type: (t as any).transaction_type,
+        amount: t.amount,
+        category: t.category || '',
+        description: t.description || '',
+        tags: tagsArray.join('|'),
+        employee_id: employeeId,
+        employee,
+        project_id: projectId,
+        project,
+        task_id: (t as any).task_id || '',
+        created_at: (t as any).created_at || '',
+        updated_at: (t as any).updated_at || '',
+      }
+    })
+    const XLSX = await import('xlsx')
+    const ws = XLSX.utils.json_to_sheet(rows, { header: [...header] as any })
+    // Auto width per column based on content length (capped)
+    const maxLen = (k: keyof typeof rows[number]) => Math.min(60, Math.max(String(k).length, ...rows.map(r => String((r as any)[k] ?? '').length)))
+    ws['!cols'] = (header as unknown as string[]).map(k => ({ wch: maxLen(k as any) + 2 }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Finance')
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `finance_${new Date().toISOString().slice(0,10)}.xlsx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -228,7 +311,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                 <button className={`h-7 px-2 rounded border ${preset==='90'?'bg-muted':''}`} onClick={()=>setPreset('90')}>90д</button>
                 <button className={`h-7 px-2 rounded border ${preset==='all'?'bg-muted':''}`} onClick={()=>setPreset('all')}>Все</button>
               </div>
-              <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={exportCSV}><Download className="h-4 w-4" /> Export CSV</button>
+              <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={exportCSV}><Download className="h-4 w-4" /> CSV</button>
+              <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={exportXLSX}><Download className="h-4 w-4" /> XLSX</button>
               <button className="h-8 w-8 rounded border inline-flex items-center justify-center" onClick={onClose} aria-label="Закрыть"><X className="h-4 w-4" /></button>
             </div>
           </div>
@@ -347,6 +431,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                     <th className="py-2 pr-2">Категория</th>
                     <th className="py-2 pr-2">Теги</th>
                     <th className="py-2 pr-2">Сотрудник</th>
+          <th className="py-2 pr-2">Проект</th>
                     <th className="py-2 pr-2">Описание</th>
                     <th className="py-2 pr-2"></th>
                   </tr>
@@ -354,6 +439,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                 <tbody>
                   {filtered.map((t) => {
                     const employee = (t as any).employee_id ? employees.find(e => e.id === (t as any).employee_id) : null
+          const project = (t as any).project_id ? projects.find(p => p.id === (t as any).project_id) : null
                     const isSel = selected.has(t.id)
                     const tagsArr = Array.isArray((t as any).tags) ? (t as any).tags : []
                     return (
@@ -379,6 +465,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                           ) : '-'}
                         </td>
                         <td className="py-2 pr-2">{employee?.name || '-'}</td>
+            <td className="py-2 pr-2">{project?.name || '-'}</td>
                         <td className="py-2 pr-2">{t.description || '-'}</td>
                         <td className="py-2 pr-2 text-right">
                           <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => remove(t.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
