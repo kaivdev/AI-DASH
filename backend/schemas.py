@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
 from typing import Optional, List
 from datetime import date, datetime
 
@@ -290,13 +290,21 @@ class RegisterRequest(BaseModel):
     password: str
     # Accept both snake_case and camelCase from frontend (confirm_password or confirmPassword)
     confirm_password: str = Field(..., alias="confirmPassword")
-    code: Optional[str] = None
+    code: Optional[str] = Field(None, description="Registration code, empty string treated as None")
     # Accept both naming styles for convenience
     first_name: Optional[str] = Field(None, alias="firstName")
     last_name: Optional[str] = Field(None, alias="lastName")
 
     # pydantic v2: allow population by field name in addition to alias
     model_config = {"populate_by_name": True}
+    
+    @field_validator('code')
+    @classmethod
+    def empty_string_to_none(cls, v):
+        # Convert empty or whitespace-only strings to None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 class LoginRequest(BaseModel):
     email: EmailStr

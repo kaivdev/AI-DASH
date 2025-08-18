@@ -157,6 +157,10 @@ def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)):
     raw_code = getattr(payload, "code", None)
     if isinstance(raw_code, str):
         raw_code = raw_code.strip()
+    # Treat empty string as None
+    if not raw_code:
+        raw_code = None
+    
     code = None
     if raw_code:
         code = (
