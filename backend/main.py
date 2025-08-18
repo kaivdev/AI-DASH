@@ -153,12 +153,15 @@ async def health():
 # --- Auth endpoints ---
 @app.post("/api/auth/register", response_model=schemas.AuthResponse)
 def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)):
-    # Code is optional ONLY for the very first user; otherwise required
+    # Invite code: treat empty/whitespace as absent
+    raw_code = getattr(payload, "code", None)
+    if isinstance(raw_code, str):
+        raw_code = raw_code.strip()
     code = None
-    if getattr(payload, "code", None):
+    if raw_code:
         code = (
             db.query(models.RegistrationCode)
-            .filter(models.RegistrationCode.code == payload.code, models.RegistrationCode.is_active == True)
+            .filter(models.RegistrationCode.code == raw_code, models.RegistrationCode.is_active == True)
             .first()
         )
         if not code:

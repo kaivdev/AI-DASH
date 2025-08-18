@@ -107,10 +107,13 @@ export const useAuth = create<AuthState>()(
 					return
 				}
 				try {
+					// Do not send empty code field
+					const payload: any = { email, password, confirm_password: confirmPassword, first_name: firstName, last_name: lastName }
+					if (code && code.trim() !== '') payload.code = code.trim()
 					const resp = await fetch('http://localhost:8000/api/auth/register', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ email, password, confirm_password: confirmPassword, code, first_name: firstName, last_name: lastName })
+						body: JSON.stringify(payload)
 					})
 					if (!resp.ok) {
 						let msg = 'Registration failed'
