@@ -5,7 +5,7 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { useMemo, useState, useEffect } from 'react'
 import { Plus, Trash2, TrendingUp } from 'lucide-react'
 import { FinanceBoardDialog } from './FinanceBoardDialog'
-import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts'
+import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { Select } from '@/components/Select'
 
 function getMonthKey(d: string) {
@@ -120,13 +120,14 @@ export function FinanceCard() {
           </div>
           <div className="h-28">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} barSize={8}>
+              <LineChart data={chartData} margin={{ left: 6, right: 6 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
                 <XAxis dataKey="date" hide tickLine={false} axisLine={false} />
                 <YAxis hide />
-                <Tooltip contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }} cursor={{ fill: 'hsl(var(--muted)/.4)' }} />
-                <Bar dataKey="income" fill="#22c55e" radius={[2,2,0,0]} />
-                <Bar dataKey="expense" fill="#ef4444" radius={[2,2,0,0]} />
-              </BarChart>
+                <Tooltip contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }} />
+                <Line type="monotone" dataKey="income" stroke="#22c55e" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={2} dot={false} />
+              </LineChart>
             </ResponsiveContainer>
           </div>
         </div>

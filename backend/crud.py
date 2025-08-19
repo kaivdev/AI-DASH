@@ -682,6 +682,11 @@ def generate_task_finance_if_needed(db: Session, task_id: str) -> Optional[model
                 project_id=db_task.project_id,
                 task_id=db_task.id,
             )
+            # ensure tenant scoping for finance records generated from tasks
+            try:
+                exp_tx.organization_id = getattr(db_task, "organization_id", None)
+            except Exception:
+                pass
             db.add(exp_tx)
             db_task.expense_tx_id = exp_tx.id
         # Income (billing)
@@ -698,6 +703,11 @@ def generate_task_finance_if_needed(db: Session, task_id: str) -> Optional[model
                 project_id=db_task.project_id,
                 task_id=db_task.id,
             )
+            # ensure tenant scoping for finance records generated from tasks
+            try:
+                inc_tx.organization_id = getattr(db_task, "organization_id", None)
+            except Exception:
+                pass
             db.add(inc_tx)
             db_task.income_tx_id = inc_tx.id
     db.commit()

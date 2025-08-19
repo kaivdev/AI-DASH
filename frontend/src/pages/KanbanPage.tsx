@@ -420,6 +420,13 @@ export function KanbanPage() {
     try {
       await updateTask(taskId, updates)
       console.log('Task updated successfully')
+      // Refresh finance if task was completed and approved (admin action)
+      try {
+        if (newStatus === 'completed' || updates.done === true) {
+          const mod = await import('@/stores/useFinance')
+          mod.useFinance.getState().fetch().catch(() => {})
+        }
+      } catch {}
       // Убираем оптимистичный оверрайд — задача уже обновлена на сервере
       setOptimisticStatus(prev => {
         const { [taskId]: _, ...rest } = prev

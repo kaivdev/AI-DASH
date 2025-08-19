@@ -91,6 +91,35 @@ def _backfill_task_approvals():
     except Exception as e:
         print(f"Backfill approvals error: {e}")
 
+def _backfill_transaction_org_ids():
+    """One-time/backstop backfill: set transactions.organization_id from linked task if missing.
+    Works for both SQLite and Postgres using correlated subquery.
+    """
+    try:
+        with engine.begin() as conn:
+            # From linked task
+            conn.execute(_text(
+                """
+                UPDATE transactions
+                SET organization_id = (
+                    SELECT organization_id FROM tasks WHERE tasks.id = transactions.task_id
+                )
+                WHERE organization_id IS NULL AND task_id IS NOT NULL
+                """
+            ))
+            # Fallback: from employee
+            conn.execute(_text(
+                """
+                UPDATE transactions
+                SET organization_id = (
+                    SELECT organization_id FROM employees WHERE employees.id = transactions.employee_id
+                )
+                WHERE organization_id IS NULL AND employee_id IS NOT NULL
+                """
+            ))
+    except Exception as e:
+        print(f"Backfill tx org error: {e}")
+
 app = FastAPI(title="Dashboard API", version="1.0.0")
 
 # Configure CORS
@@ -132,6 +161,8 @@ def startup_seed():
         db.close()
     # Backfill: approve all already completed tasks (compatibility)
     _backfill_task_approvals()
+    # Backfill: set org_id for transactions created from tasks earlier
+    _backfill_transaction_org_ids()
     # Try to set Telegram webhook if configured; otherwise start long polling in background
     try:
         from config import settings as _cfg
@@ -949,6 +980,14 @@ def update_task(task_id: str, task: schemas.TaskUpdate, db: Session = Depends(ge
         
         # Refresh task after any approval changes
         if has_approved_explicit or (getattr(db_task, "done", False) and not has_approved_explicit):
+            db_task = crud.get_task(db, task_id)
+    except Exception:
+        pass
+    # If task is done and approved -> ensure finance records are generated (idempotent)
+    try:
+        if getattr(db_task, "done", False) and bool(getattr(db_task, "approved", False)):
+            crud.generate_task_finance_if_needed(db, task_id)
+            # refresh once more to return updated links
             db_task = crud.get_task(db, task_id)
     except Exception:
         pass
