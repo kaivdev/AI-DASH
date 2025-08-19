@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { API_BASE_URL } from '@/lib/api'
 import { toast } from 'sonner'
 
 interface AuthProfile {
@@ -69,7 +70,7 @@ export const useAuth = create<AuthState>()(
 				}
 
 				try {
-					const resp = await fetch('http://localhost:8000/api/auth/login', {
+					const resp = await fetch(`${API_BASE_URL}/auth/login`, {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({ email, password })
@@ -110,7 +111,7 @@ export const useAuth = create<AuthState>()(
 					// Do not send empty code field
 					const payload: any = { email, password, confirm_password: confirmPassword, first_name: firstName, last_name: lastName }
 					if (code && code.trim() !== '') payload.code = code.trim()
-					const resp = await fetch('http://localhost:8000/api/auth/register', {
+					const resp = await fetch(`${API_BASE_URL}/auth/register`, {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify(payload)
@@ -144,7 +145,7 @@ export const useAuth = create<AuthState>()(
 				const token = get().token
 				if (!token || !useBackendAuth) return
 				try {
-					const resp = await fetch('http://localhost:8000/api/auth/me', {
+					const resp = await fetch(`${API_BASE_URL}/auth/me`, {
 						headers: { Authorization: `Bearer ${token}` }
 					})
 					if (resp.ok) {

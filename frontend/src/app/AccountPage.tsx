@@ -1,5 +1,5 @@
 import { useAuth } from '@/stores/useAuth'
-import { inviteApi } from '@/lib/api'
+import { inviteApi, API_BASE_URL } from '@/lib/api'
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 
@@ -105,7 +105,7 @@ export function AccountPage() {
     setSaving(true)
     setSaveMsg(null)
     try {
-      const resp = await fetch('http://localhost:8000/api/auth/profile', {
+  const resp = await fetch(`${API_BASE_URL}/auth/profile`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -138,7 +138,7 @@ export function AccountPage() {
   async function onChangePassword() {
     if (!currentPassword || !newPassword) return
     try {
-      const resp = await fetch('http://localhost:8000/api/auth/password', {
+  const resp = await fetch(`${API_BASE_URL}/auth/password`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -157,7 +157,7 @@ export function AccountPage() {
     if (!file) return
     const formData = new FormData()
     formData.append('file', file)
-    await fetch('http://localhost:8000/api/auth/avatar', {
+  await fetch(`${API_BASE_URL}/auth/avatar`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

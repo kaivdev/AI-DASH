@@ -1,1 +1,0 @@
-This file was removed as SQLite support has been dropped. If you still need to migrate from a legacy SQLite database, recover this script from git history or contact the maintainer.

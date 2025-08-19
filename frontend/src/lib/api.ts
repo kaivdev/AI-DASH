@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8000/api'
+export const API_BASE_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL) || '/api'
 const __DEV__ = typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.DEV
 
 // Generic API functions
