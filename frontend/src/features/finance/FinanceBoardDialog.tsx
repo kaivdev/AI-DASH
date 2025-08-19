@@ -9,7 +9,8 @@ import { Select } from '@/components/Select'
 import { X, Plus, Trash2, Download } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { Checkbox } from '@/components/ui/checkbox'
-import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts'
+import { ResponsiveContainer, CartesianGrid, XAxis, YAxis, AreaChart, Area } from 'recharts'
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 
 export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolean; onClose: () => void; presetType: 'income' | 'expense' | null }) {
   const [show, setShow] = useState(false)
@@ -45,6 +46,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const [maxHours, setMaxHours] = useState('')
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [chartMode, setChartMode] = useState<'days' | 'months'>('days')
 
   // selection
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -131,49 +133,47 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   }, [txs, filterType, dateFrom, dateTo, categoryFilter, tagsFilter, employeeFilter, projectFilter, query, minAmount, maxAmount, minHours, maxHours, sortBy, sortDir, hoursByTask])
 
   // charts
-  const pieData = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const t of filtered) {
-      if ((t as any).transaction_type !== 'expense') continue
-      const key = t.category || '—'
-      map.set(key, (map.get(key) || 0) + t.amount)
-    }
-    return Array.from(map.entries()).map(([name, value]) => ({ name, value }))
-  }, [filtered])
-
   const lineData = useMemo(() => {
-    if (filtered.length === 0) return []
-    const dates = filtered.map(t => t.date).sort()
-    const start = dates[0]
-    const end = dates[dates.length - 1]
-    // build daily range
-    const range: string[] = []
-    const d = new Date(start)
-    const endD = new Date(end)
-    while (d <= endD) {
-      range.push(d.toISOString().slice(0,10))
-      d.setDate(d.getDate() + 1)
+    if (chartMode === 'days') {
+      // 7 дней, сегодня по центру: -3 .. +3
+      const range: string[] = []
+      const today = new Date()
+      for (let offset = -3; offset <= 3; offset++) {
+        const d = new Date(today)
+        d.setDate(today.getDate() + offset)
+        range.push(d.toISOString().slice(0, 10))
+      }
+      const daySum = new Map<string, { income: number; expense: number }>()
+      for (const day of range) daySum.set(day, { income: 0, expense: 0 })
+  for (const t of txs) {
+        if (!daySum.has(t.date)) continue
+        const row = daySum.get(t.date)!
+        if ((t as any).transaction_type === 'income') row.income += t.amount
+        else row.expense += t.amount
+        daySum.set(t.date, row)
+      }
+      return range.map((day) => ({ date: day, ...daySum.get(day)! }))
     }
-    // daily sums
-    const daySum = new Map<string, { income: number; expense: number }>()
-    for (const day of range) daySum.set(day, { income: 0, expense: 0 })
-    for (const t of filtered) {
-      const key = t.date
-      const row = daySum.get(key) || { income: 0, expense: 0 }
+    // months mode: последние 6 месяцев, по месяцам (YYYY-MM)
+    const rangeM: string[] = []
+    const now = new Date()
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      rangeM.push(ym)
+    }
+    const sumM = new Map<string, { income: number; expense: number }>()
+    for (const m of rangeM) sumM.set(m, { income: 0, expense: 0 })
+    for (const t of txs) {
+      const m = t.date.slice(0, 7)
+      if (!sumM.has(m)) continue
+      const row = sumM.get(m)!
       if ((t as any).transaction_type === 'income') row.income += t.amount
       else row.expense += t.amount
-      daySum.set(key, row)
+      sumM.set(m, row)
     }
-    // cumulative series
-    let accInc = 0
-    let accExp = 0
-    return range.map((day) => {
-      const sums = daySum.get(day)!
-      accInc += sums.income
-      accExp += sums.expense
-      return { date: day, income: accInc, expense: accExp }
-    })
-  }, [filtered])
+    return rangeM.map((m) => ({ date: m, ...sumM.get(m)! }))
+  }, [txs, chartMode])
 
   // Hours table: aggregate task hours by project and employee (global or filtered by date range if possible)
   const hoursTable = useMemo(() => {
@@ -377,43 +377,88 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
           <div className="p-5 space-y-4 overflow-auto">
             {/* Quick stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Сумма доходов</div><div className="text-lg font-semibold text-green-600 dark:text-green-400">{formatCurrency(stats.incSum,'RUB')}</div></div>
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Сумма расходов</div><div className="text-lg font-semibold text-red-600 dark:text-red-400">{formatCurrency(stats.expSum,'RUB')}</div></div>
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Средний дневной доход</div><div className="text-lg font-semibold">{formatCurrency(stats.avgIncome,'RUB')}</div></div>
-              <div className="rounded border p-3 min-w-0"><div className="text-xs text-muted-foreground">Средний дневной расход</div><div className="text-lg font-semibold">{formatCurrency(stats.avgExpense,'RUB')}</div></div>
-            </div>
-
-            {/* Charts */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded border p-3 min-w-0">
-                <div className="text-sm text-muted-foreground mb-2">Распределение расходов по категориям</div>
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={90} innerRadius={50}>
-                        {pieData.map((_, i) => <Cell key={i} fill={["#22c55e","#ef4444","#6366f1","#f59e0b","#06b6d4","#84cc16"][i % 6]} />)}
-                      </Pie>
-                      <Legend />
-                      <Tooltip contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
+                <div className="text-xs text-muted-foreground">Сумма доходов</div>
+                <div className="text-lg font-semibold text-green-600 dark:text-green-400">{formatCurrency(Math.round(stats.incSum),'RUB')}</div>
               </div>
               <div className="rounded border p-3 min-w-0">
-                <div className="text-sm text-muted-foreground mb-2">Динамика доходов/расходов (накопит.)</div>
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={lineData}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-                      <XAxis dataKey="date" hide />
-                      <YAxis hide />
-                      <Tooltip contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }} />
-                      <Legend />
-                      <Line type="monotone" dataKey="income" name="доход" stroke="#22c55e" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="expense" name="расход" stroke="#ef4444" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="text-xs text-muted-foreground">Сумма расходов</div>
+                <div className="text-lg font-semibold text-red-600 dark:text-red-400">{formatCurrency(Math.round(stats.expSum),'RUB')}</div>
+              </div>
+              <div className="rounded border p-3 min-w-0">
+                <div className="text-xs text-muted-foreground">Средний дневной доход</div>
+                <div className="text-lg font-semibold">{formatCurrency(Math.round(stats.avgIncome),'RUB')}</div>
+              </div>
+              <div className="rounded border p-3 min-w-0">
+                <div className="text-xs text-muted-foreground">Средний дневной расход</div>
+                <div className="text-lg font-semibold">{formatCurrency(Math.round(stats.avgExpense),'RUB')}</div>
+              </div>
+            </div>
+            {/* Chart: последние 7 дней */}
+            <div className="rounded border p-3 min-w-0">
+              <div className="text-sm text-muted-foreground mb-2 flex items-center justify-between gap-3">
+                <span>Динамика доходов/расходов — {chartMode === 'days' ? '7 дней' : '6 месяцев'}</span>
+                <div className="w-[140px]">
+                  <Select
+                    className="w-full"
+                    value={chartMode}
+                    onChange={(v)=> setChartMode(v as 'days' | 'months')}
+                    options={[
+                      { value: 'days', label: 'Дни' },
+                      { value: 'months', label: 'Месяца' },
+                    ]}
+                  />
                 </div>
+              </div>
+              <div className="h-56">
+                <ChartContainer
+                  config={{
+                    income: { label: 'Доход', color: 'var(--chart-1, #22c55e)' },
+                    expense: { label: 'Расход', color: 'var(--chart-2, #ef4444)' },
+                  }}
+                  className="h-full"
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={lineData} margin={{ left: 12, right: 12 }}>
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.2} />
+                      <XAxis
+                        dataKey="date"
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={8}
+                        padding={{ left: 24, right: 24 }}
+                        tickFormatter={(value: string) =>
+                          chartMode === 'days'
+                            ? `${value.slice(8,10)}.${value.slice(5,7)}` // DD.MM
+                            : `${value.slice(5,7)}.${value.slice(2,4)}`   // MM.YY
+                        }
+                      />
+                      <YAxis hide />
+                      <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                      <Area
+                        dataKey="expense"
+                        name="расход"
+                        type="natural"
+                        fill="var(--color-expense)"
+                        fillOpacity={0.35}
+                        stroke="var(--color-expense)"
+                        strokeWidth={2}
+                        stackId="a"
+                      />
+                      <Area
+                        dataKey="income"
+                        name="доход"
+                        type="natural"
+                        fill="var(--color-income)"
+                        fillOpacity={0.35}
+                        stroke="var(--color-income)"
+                        strokeWidth={2}
+                        stackId="a"
+                      />
+                      <ChartLegend content={<ChartLegendContent />} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
               </div>
             </div>
 
@@ -434,7 +479,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                       <tr key={`${r.projectId}:${r.employeeId}:${i}`} className="border-b last:border-b-0">
                         <td className="py-2 px-2 whitespace-nowrap">{r.projectName}</td>
                         <td className="py-2 px-2 whitespace-nowrap">{r.employeeName}</td>
-                        <td className="py-2 px-2 text-right">{r.hours.toFixed(1)}</td>
+                        <td className="py-2 px-2 text-right">{Math.round(r.hours)}</td>
                       </tr>
                     ))}
                     {hoursTable.length === 0 && (
@@ -447,12 +492,12 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
 
             {/* Quick add */}
             <div className="p-4 border rounded bg-muted/10 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-              <div className="md:col-span-12 text-xs text-muted-foreground flex flex-wrap gap-4">
+      <div className="md:col-span-12 text-xs text-muted-foreground flex flex-wrap gap-4">
                 {Array.from(stats.byProject?.entries?.() || []).slice(0,6).map(([pid, v]) => (
                   <div key={pid} className="inline-flex items-center gap-2">
                     <span className="px-2 py-0.5 rounded bg-muted">{projects.find(p=>p.id===pid)?.name || pid}</span>
-                    <span className="text-green-600">+{v.income}</span>
-                    <span className="text-red-600">-{v.expense}</span>
+        <span className="text-green-600">+{Math.round(v.income)}</span>
+        <span className="text-red-600">-{Math.round(v.expense)}</span>
                   </div>
                 ))}
               </div>
@@ -539,7 +584,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                             {(t as any).transaction_type === 'income' ? 'доход' : 'расход'}
                           </span>
                         </td>
-                        <td className="py-2 pr-2 text-right font-medium">{formatCurrency(t.amount, 'RUB')}</td>
+                        <td className="py-2 pr-2 text-right font-medium">{formatCurrency(Math.round(t.amount), 'RUB')}</td>
                         <td className="py-2 pr-2">{t.category || '-'}</td>
                         <td className="py-2 pr-2">
                           {tagsArr.length > 0 ? (
