@@ -261,7 +261,7 @@ def clear_chat_messages(db: Session, user_id: str, session_id: str) -> bool:
 
 # Employee CRUD
 def get_employees(db: Session) -> List[models.Employee]:
-    return db.query(models.Employee).all()
+    return db.query(models.Employee).order_by(models.Employee.created_at.desc()).all()
 
 def find_employee_by_name(db: Session, name: str) -> Optional[models.Employee]:
     if not name:
@@ -279,7 +279,9 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate) -> models.Emp
     sal = data.get("salary")
     if sal is not None and data.get("cost_hourly_rate") is None:
         try:
-            hours = max(1, int(settings.PLANNED_MONTHLY_HOURS))
+            # prefer per-employee planned hours if provided
+            ph = data.get("planned_monthly_hours")
+            hours = max(1, int(ph if ph is not None else settings.PLANNED_MONTHLY_HOURS))
         except Exception:
             hours = 160
         data["cost_hourly_rate"] = int(round(float(sal) / float(hours)))
@@ -292,24 +294,53 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate) -> models.Emp
     db.refresh(db_employee)
     return db_employee
 
-def update_employee(db: Session, employee_id: str, employee: schemas.EmployeeUpdate) -> Optional[models.Employee]:
+def update_employee(db: Session, employee_id: str, employee: schemas.EmployeeUpdate, allow_recalc: bool = True) -> Optional[models.Employee]:
     db_employee = get_employee(db, employee_id)
-    if db_employee:
-        update_data = employee.model_dump(exclude_unset=True)
-        # If salary is updated and cost_hourly_rate not explicitly passed -> recalc
-        if "salary" in update_data and "cost_hourly_rate" not in update_data and update_data.get("salary") is not None:
-            try:
-                hours = max(1, int(settings.PLANNED_MONTHLY_HOURS))
-            except Exception:
-                hours = 160
-            try:
-                update_data["cost_hourly_rate"] = int(round(float(update_data["salary"]) / float(hours)))
-            except Exception:
-                pass
-        for field, value in update_data.items():
-            setattr(db_employee, field, value)
-        db.commit()
-        db.refresh(db_employee)
+    if not db_employee:
+        return None
+    update_data = employee.model_dump(exclude_unset=True)
+
+    # If salary is updated and cost_hourly_rate not explicitly passed -> recalc
+    if (
+        allow_recalc
+        and "salary" in update_data
+        and "cost_hourly_rate" not in update_data
+        and update_data.get("salary") is not None
+    ):
+        try:
+            # consider updated planned_monthly_hours if provided in same patch, else existing value, else global default
+            if (
+                "planned_monthly_hours" in update_data
+                and update_data.get("planned_monthly_hours") is not None
+            ):
+                hours_source = update_data.get("planned_monthly_hours")
+            else:
+                hours_source = getattr(db_employee, "planned_monthly_hours", None)
+            hours = max(1, int(hours_source if hours_source is not None else settings.PLANNED_MONTHLY_HOURS))
+        except Exception:
+            hours = 160
+        try:
+            update_data["cost_hourly_rate"] = int(round(float(update_data["salary"]) / float(hours)))
+        except Exception:
+            pass
+    # If only planned_monthly_hours changes and salary exists, recalc cost unless explicitly provided
+    elif (
+        allow_recalc
+        and ("planned_monthly_hours" in update_data)
+        and (update_data.get("planned_monthly_hours") is not None)
+        and ("cost_hourly_rate" not in update_data)
+        and (getattr(db_employee, "salary", None) is not None)
+    ):
+        try:
+            hours = max(1, int(update_data.get("planned_monthly_hours")))
+            update_data["cost_hourly_rate"] = int(round(float(db_employee.salary) / float(hours)))
+        except Exception:
+            pass
+
+    for field, value in update_data.items():
+        setattr(db_employee, field, value)
+    db.commit()
+    db.refresh(db_employee)
     return db_employee
 
 def update_employee_status(db: Session, employee_id: str, status_update: schemas.EmployeeStatusUpdate) -> Optional[models.Employee]:

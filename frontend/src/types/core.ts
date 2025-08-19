@@ -66,6 +66,7 @@ export interface Employee {
   hourly_rate?: number
   cost_hourly_rate?: number
   bill_hourly_rate?: number
+  planned_monthly_hours?: number
   created_at: string
   updated_at?: string
 }

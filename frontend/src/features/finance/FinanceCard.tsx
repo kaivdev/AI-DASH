@@ -5,6 +5,7 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { useMemo, useState, useEffect } from 'react'
 import { Plus, Trash2, TrendingUp } from 'lucide-react'
 import { FinanceBoardDialog } from './FinanceBoardDialog'
+import { QuickAddTransactionDialog } from './QuickAddTransactionDialog'
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { Select } from '@/components/Select'
 
@@ -19,12 +20,13 @@ export function FinanceCard() {
   const employees = useEmployees((s) => s.employees)
 
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [quickOpen, setQuickOpen] = useState(false)
   const [presetType, setPresetType] = useState<'income' | 'expense' | null>(null)
   const [period, setPeriod] = useState<'7' | '30' | '90' | 'all'>('7')
 
   useEffect(() => {
     fetchFinance().catch(()=>{})
-    function onTitleClick(e: any) { if (e?.detail?.id === 'finance') setDialogOpen(true) }
+  function onTitleClick(e: any) { if (e?.detail?.id === 'finance') setDialogOpen(true) }
     window.addEventListener('module-title-click', onTitleClick as any)
     return () => window.removeEventListener('module-title-click', onTitleClick as any)
   }, [fetchFinance])
@@ -81,8 +83,8 @@ export function FinanceCard() {
   const lastTx = useMemo(() => txs.slice().sort((a,b)=> b.date.localeCompare(a.date)).slice(0,8), [txs])
 
   function openDialog(type: 'income' | 'expense') {
-    setPresetType(type)
-    setDialogOpen(true)
+  setPresetType(type)
+  setQuickOpen(true)
   }
 
   return (
@@ -90,7 +92,8 @@ export function FinanceCard() {
       <button className="h-7 px-2 rounded border text-xs" onClick={() => openDialog('income')}>+ доход</button>
       <button className="h-7 px-2 rounded border text-xs" onClick={() => openDialog('expense')}>+ расход</button>
     </div>}>
-      <FinanceBoardDialog open={dialogOpen} presetType={presetType} onClose={() => { setDialogOpen(false); setPresetType(null) }} />
+  <FinanceBoardDialog open={dialogOpen} presetType={null} onClose={() => { setDialogOpen(false) }} />
+  <QuickAddTransactionDialog open={quickOpen} presetType={presetType} onClose={() => { setQuickOpen(false); setPresetType(null) }} />
 
       <div className="flex flex-col gap-4 h-full min-h-0">
         {/* Summary */}
@@ -125,8 +128,8 @@ export function FinanceCard() {
                 <XAxis dataKey="date" hide tickLine={false} axisLine={false} />
                 <YAxis hide />
                 <Tooltip contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }} />
-                <Line type="monotone" dataKey="income" stroke="#22c55e" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="income" name="доход" stroke="#22c55e" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="expense" name="расход" stroke="#ef4444" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>

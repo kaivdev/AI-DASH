@@ -91,3 +91,31 @@
   .scroll-area::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 8px; }
   .scroll-area:hover::-webkit-scrollbar-thumb { background-color: hsl(var(--muted-foreground) / 0.35); }
 } 
+
+/* Editor theming fixes (Notes drawer) */
+@layer components {
+  /* Ensure Markdown editor content is readable in both themes */
+  .g-md-editor, .g-md-editor .milkdown, .g-md-editor .ProseMirror {
+    color: hsl(var(--foreground));
+    background-color: hsl(var(--background));
+  }
+
+  /* Selection color inside editor */
+  .g-md-editor .ProseMirror ::selection { background-color: hsl(var(--primary) / 0.25); }
+
+  /* Code blocks (highlight.js) adjustments for dark theme */
+  .dark pre code.hljs,
+  .dark code.hljs { color: #e6edf3; background: #0d1117; }
+  .dark pre.hljs,
+  .dark pre code { background: #0d1117; }
+  .dark .hljs-comment,
+  .dark .hljs-quote { color: #8b949e; }
+  .dark .hljs-keyword,
+  .dark .hljs-selector-tag,
+  .dark .hljs-subst { color: #ff7b72; }
+  .dark .hljs-string,
+  .dark .hljs-title,
+  .dark .hljs-name,
+  .dark .hljs-type,
+  .dark .hljs-attribute { color: #a5d6ff; }
+}

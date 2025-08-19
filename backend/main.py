@@ -38,6 +38,7 @@ def _ensure_postgres_schema():
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='cost_hourly_rate') THEN ALTER TABLE employees ADD COLUMN cost_hourly_rate INTEGER; END IF; END $$;"))
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='bill_hourly_rate') THEN ALTER TABLE employees ADD COLUMN bill_hourly_rate INTEGER; END IF; END $$;"))
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='telegram_chat_id') THEN ALTER TABLE employees ADD COLUMN telegram_chat_id TEXT; END IF; END $$;"))
+            conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='employees' AND column_name='planned_monthly_hours') THEN ALTER TABLE employees ADD COLUMN planned_monthly_hours INTEGER; END IF; END $$;"))
             # notes/reading_items/goals.user_id
             conn.execute(_text("ALTER TABLE IF EXISTS notes ADD COLUMN IF NOT EXISTS user_id TEXT"))
             conn.execute(_text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE table_name='notes' AND constraint_name='notes_user_fk') THEN ALTER TABLE notes ADD CONSTRAINT notes_user_fk FOREIGN KEY (user_id) REFERENCES users(id); END IF; END $$;"))
@@ -409,7 +410,12 @@ def get_employees(db: Session = Depends(get_db), authorization: Optional[str] = 
         if user:
             # Owners/admins: вся организация
             if user.role in ("owner", "admin"):
-                return db.query(models.Employee).filter(models.Employee.organization_id == user.organization_id).all()
+                return (
+                    db.query(models.Employee)
+                    .filter(models.Employee.organization_id == user.organization_id)
+                    .order_by(models.Employee.created_at.desc())
+                    .all()
+                )
             # Обычный пользователь: только собственная карточка
             emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
             return [emp] if emp else []
@@ -462,11 +468,19 @@ def update_employee(employee_id: str, employee: schemas.EmployeeUpdate, db: Sess
         token = authorization.split(" ", 1)[1]
         user = crud.get_user_by_token(db, token)
         if user and user.role not in ("owner", "admin"):
-            forbidden_fields = {"hourly_rate", "cost_hourly_rate", "bill_hourly_rate", "revenue", "salary"}
+            # forbid direct changes to rates, revenue/salary and planned hours
+            forbidden_fields = {"hourly_rate", "cost_hourly_rate", "bill_hourly_rate", "revenue", "salary", "planned_monthly_hours"}
             payload = employee.model_dump(exclude_unset=True)
             if any(f in payload for f in forbidden_fields):
                 raise HTTPException(status_code=403, detail="Forbidden: insufficient permissions to modify these fields")
-    db_employee = crud.update_employee(db, employee_id, employee)
+    # allow auto-recalc only for admins; for regular users, do not recalc rates implicitly
+    allow_recalc = True
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if not user or user.role not in ("owner", "admin"):
+            allow_recalc = False
+    db_employee = crud.update_employee(db, employee_id, employee, allow_recalc=allow_recalc)
     if not db_employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     return db_employee
@@ -498,7 +512,22 @@ def get_projects(db: Session = Depends(get_db), authorization: Optional[str] = H
         user = crud.get_user_by_token(db, token)
         if user:
             if user.role in ("owner", "admin"):
-                return db.query(models.Project).filter(models.Project.organization_id == user.organization_id).all()
+                # Need to include computed fields like member_ids and member rate maps
+                projects = (
+                    db.query(models.Project)
+                    .filter(models.Project.organization_id == user.organization_id)
+                    .all()
+                )
+                for project in projects:
+                    # Populate computed fields to satisfy response schema
+                    project.member_ids = [m.employee_id for m in project.members]
+                    project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
+                    project.member_cost_rates = {m.employee_id: m.cost_hourly_rate for m in project.members}
+                    project.member_bill_rates = {
+                        m.employee_id: (m.bill_hourly_rate if m.bill_hourly_rate is not None else m.hourly_rate)
+                        for m in project.members
+                    }
+                return projects
             return crud.list_projects_for_user(db, user)
     return []
 

@@ -33,6 +33,8 @@ class Employee(Base):
     # New: separate rates
     cost_hourly_rate = Column(Integer, nullable=True)  # фактическая стоимость часа сотрудника
     bill_hourly_rate = Column(Integer, nullable=True)  # сколько берем с клиента за час
+    # Per-employee planned working hours per month (used for salary -> cost rate calc)
+    planned_monthly_hours = Column(Integer, nullable=True)
     # Link to app user (optional, unique per user)
     user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=True)
     # Tenant scoping

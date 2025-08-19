@@ -16,6 +16,7 @@ class EmployeeBase(BaseModel):
     hourly_rate: Optional[int] = None  # legacy
     cost_hourly_rate: Optional[int] = None
     bill_hourly_rate: Optional[int] = None
+    planned_monthly_hours: Optional[int] = None
 
 class EmployeeCreate(EmployeeBase):
     pass
@@ -33,6 +34,7 @@ class EmployeeUpdate(BaseModel):
     hourly_rate: Optional[int] = None
     cost_hourly_rate: Optional[int] = None
     bill_hourly_rate: Optional[int] = None
+    planned_monthly_hours: Optional[int] = None
 
 class EmployeeStatusUpdate(BaseModel):
     current_status: str

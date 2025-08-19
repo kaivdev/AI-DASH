@@ -36,9 +36,11 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
       setRevenue(typeof employee.revenue === 'number' ? String(employee.revenue) : '')
   setCostHourly(typeof (employee as any).cost_hourly_rate === 'number' ? String((employee as any).cost_hourly_rate) : '')
   setBillHourly(typeof (employee as any).bill_hourly_rate === 'number' ? String((employee as any).bill_hourly_rate) : '')
-      setStatus(employee.current_status || '')
+  setStatus(employee.current_status || '')
       setStatusTag(employee.status_tag || '')
-  setPlannedHours('160')
+  // init planned hours from employee if present, else default 160
+  const ph = (employee as any).planned_monthly_hours
+  setPlannedHours(typeof ph === 'number' ? String(ph) : '160')
       setIsEditing(false)
     }
   }, [employee])
@@ -55,6 +57,7 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
       revenue: revenue ? Number(revenue) : undefined,
   cost_hourly_rate: costHourly ? Number(costHourly) : undefined,
   bill_hourly_rate: billHourly ? Number(billHourly) : undefined,
+  planned_monthly_hours: plannedHours ? Number(plannedHours) : undefined,
     } as Partial<Omit<Employee, 'id' | 'created_at' | 'updated_at'>>
     await onEdit(e.id, patch)
     setIsEditing(false)
@@ -97,14 +100,14 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
                </div>
              )}
              {isAdmin && (
-               <div>
+              <div>
                  <div className="text-xs text-muted-foreground">Биллинговая ставка</div>
                  <div>{typeof (e as any).bill_hourly_rate === 'number' ? `${(e as any).bill_hourly_rate} ₽/ч` : '—'}</div>
                </div>
              )}
             <div>
               <div className="text-xs text-muted-foreground">План часов/мес</div>
-              <div>160</div>
+              <div>{typeof (e as any).planned_monthly_hours === 'number' ? (e as any).planned_monthly_hours : 160}</div>
             </div>
              <div>
                <div className="text-xs text-muted-foreground">Создан</div>
@@ -188,7 +191,7 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
            </div>
           <div className="flex items-center gap-2 pt-2 border-t">
             <button className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2" onClick={onSave}><Save className="h-4 w-4" /> Сохранить</button>
-            <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={() => { setIsEditing(false); setName(e.name); setPosition(e.position); setEmail(e.email||''); setSalary(typeof e.salary==='number'?String(e.salary):''); setRevenue(typeof e.revenue==='number'?String(e.revenue):''); setCostHourly(typeof (e as any).cost_hourly_rate==='number'?String((e as any).cost_hourly_rate):''); setBillHourly(typeof (e as any).bill_hourly_rate==='number'?String((e as any).bill_hourly_rate):''); setPlannedHours('160'); }}><CloseIcon className="h-4 w-4" /> Отмена</button>
+            <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={() => { setIsEditing(false); setName(e.name); setPosition(e.position); setEmail(e.email||''); setSalary(typeof e.salary==='number'?String(e.salary):''); setRevenue(typeof e.revenue==='number'?String(e.revenue):''); setCostHourly(typeof (e as any).cost_hourly_rate==='number'?String((e as any).cost_hourly_rate):''); setBillHourly(typeof (e as any).bill_hourly_rate==='number'?String((e as any).bill_hourly_rate):''); setPlannedHours(typeof (e as any).planned_monthly_hours==='number'?String((e as any).planned_monthly_hours):'160'); }}><CloseIcon className="h-4 w-4" /> Отмена</button>
           </div>
         </div>
       )}

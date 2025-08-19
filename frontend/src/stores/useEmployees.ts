@@ -83,6 +83,7 @@ export const useEmployees = create<EmployeesState>()(
              hourly_rate: (employee as any).hourly_rate || null,
        cost_hourly_rate: (employee as any).cost_hourly_rate || null,
        bill_hourly_rate: (employee as any).bill_hourly_rate || null,
+             planned_monthly_hours: (employee as any).planned_monthly_hours ?? null,
              current_status: employee.current_status,
              status_tag: employee.status_tag || null,
              status_date: employee.status_date

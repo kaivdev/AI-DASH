@@ -203,7 +203,7 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
   <div className="flex flex-col h-full gap-3">
         <div className="space-y-2">
           <input
-            className="w-full h-9 px-3 rounded border bg-background"
+            className="w-full h-9 px-3 rounded border bg-background text-foreground placeholder:text-muted-foreground"
             placeholder="Заголовок (необязательно)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}

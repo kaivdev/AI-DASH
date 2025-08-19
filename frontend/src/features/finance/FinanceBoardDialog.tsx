@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useFinance } from '@/stores/useFinance'
 import { useEmployees } from '@/stores/useEmployees'
 import { useProjects } from '@/stores/useProjects'
+import { useTasks } from '@/stores/useTasks'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { X, Plus, Trash2, Download } from 'lucide-react'
@@ -17,6 +18,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const remove = useFinance((s) => s.remove)
   const employees = useEmployees((s) => s.employees)
   const projects = useProjects((s) => s.projects)
+  const tasks = useTasks((s) => s.tasks)
 
   // quick add form
   const [amount, setAmount] = useState('')
@@ -26,6 +28,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState('')
   const [employeeId, setEmployeeId] = useState('')
+  const [projectId, setProjectId] = useState('')
 
   // filters
   const [query, setQuery] = useState('')
@@ -38,6 +41,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const [projectFilter, setProjectFilter] = useState('')
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
+  const [minHours, setMinHours] = useState('')
+  const [maxHours, setMaxHours] = useState('')
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -64,20 +69,34 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     setDateFrom(toISO(start)); setDateTo(toISO(today))
   }, [preset])
 
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+
   useEffect(() => {
     if (open) {
       setShow(true)
       const prev = document.body.style.overflow
       document.body.style.overflow = 'hidden'
-  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-  document.addEventListener('keydown', onKey)
-  if (presetType) setType(presetType)
-  return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey) }
+      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current() }
+      document.addEventListener('keydown', onKey)
+      return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey) }
     } else {
       const t = setTimeout(() => setShow(false), 200)
       return () => clearTimeout(t)
     }
-  }, [open, presetType])
+  }, [open])
+
+  // apply presetType only when dialog opens, not on every re-render
+  useEffect(() => {
+    if (open && presetType) setType(presetType)
+  }, [open])
+
+  // Map task_id -> hours for hour-based filters
+  const hoursByTask = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const t of tasks) m.set(t.id, typeof t.hours_spent === 'number' ? t.hours_spent : 0)
+    return m
+  }, [tasks])
 
   const filtered = useMemo(() => {
     return txs.filter((t) => {
@@ -99,13 +118,17 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
       const v = Number(t.amount)
       if (minAmount && v < Number(minAmount)) return false
       if (maxAmount && v > Number(maxAmount)) return false
+      // hours filter by linked task
+      const hours = (t as any).task_id ? (hoursByTask.get((t as any).task_id) ?? 0) : 0
+      if (minHours && hours < Number(minHours)) return false
+      if (maxHours && hours > Number(maxHours)) return false
       return true
     }).sort((a, b) => {
       const mul = sortDir === 'asc' ? 1 : -1
       if (sortBy === 'date') return mul * a.date.localeCompare(b.date)
       return mul * (a.amount - b.amount)
     })
-  }, [txs, filterType, dateFrom, dateTo, categoryFilter, tagsFilter, employeeFilter, projectFilter, query, minAmount, maxAmount, sortBy, sortDir])
+  }, [txs, filterType, dateFrom, dateTo, categoryFilter, tagsFilter, employeeFilter, projectFilter, query, minAmount, maxAmount, minHours, maxHours, sortBy, sortDir, hoursByTask])
 
   // charts
   const pieData = useMemo(() => {
@@ -152,6 +175,40 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     })
   }, [filtered])
 
+  // Hours table: aggregate task hours by project and employee (global or filtered by date range if possible)
+  const hoursTable = useMemo(() => {
+    // Limit by dateFrom/dateTo using task.updated_at when present
+    const inRange = (d?: string) => {
+      if (!d) return true
+      const ds = d.slice(0,10)
+      if (dateFrom && ds < dateFrom) return false
+      if (dateTo && ds > dateTo) return false
+      return true
+    }
+    const map = new Map<string, Map<string, number>>() // projectId -> (employeeId -> hours)
+    for (const t of tasks) {
+      if (!inRange(t.updated_at || t.created_at)) continue
+      const pid = t.project_id || '—'
+      const eid = t.assigned_to || '—'
+      const h = typeof t.hours_spent === 'number' ? t.hours_spent : 0
+      if (!map.has(pid)) map.set(pid, new Map())
+      const inner = map.get(pid)!
+      inner.set(eid, (inner.get(eid) || 0) + h)
+    }
+    // Build rows
+    const rows: { projectId: string; projectName: string; employeeId: string; employeeName: string; hours: number }[] = []
+    for (const [pid, inner] of map) {
+      for (const [eid, hours] of inner) {
+        const projectName = pid === '—' ? 'Без проекта' : (projects.find(p=>p.id===pid)?.name || pid)
+        const employeeName = eid === '—' ? 'Не назначен' : (employees.find(e=>e.id===eid)?.name || eid)
+        rows.push({ projectId: pid, projectName, employeeId: eid, employeeName, hours })
+      }
+    }
+    // sort by project then hours desc
+    rows.sort((a,b)=> a.projectName.localeCompare(b.projectName) || b.hours - a.hours)
+    return rows
+  }, [tasks, projects, employees, dateFrom, dateTo])
+
   // stats + per-project summary
   const stats = useMemo(() => {
     const expenses = filtered.filter(t => (t as any).transaction_type === 'expense')
@@ -181,8 +238,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   function onAdd() {
     const value = Number(amount)
     if (!Number.isFinite(value) || value <= 0) return
-    add({ amount: value, transaction_type: type, date, category, description, tags: tags.split(',').map(t=>t.trim()).filter(Boolean), employee_id: employeeId || undefined } as any)
-    setAmount(''); setCategory(''); setDescription(''); setTags(''); setEmployeeId('')
+    add({ amount: value, transaction_type: type, date, category, description, tags: tags.split(',').map(t=>t.trim()).filter(Boolean), employee_id: employeeId || undefined, project_id: projectId || undefined } as any)
+    setAmount(''); setCategory(''); setDescription(''); setTags(''); setEmployeeId(''); setProjectId('')
   }
 
   function exportCSV() {
@@ -298,10 +355,10 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   if (!open && !show) return null
 
   const node = (
-    <div className="fixed inset-0 z-50">
-      <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`} onClick={onClose} />
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+      <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-6">
-        <div className={`w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 flex flex-col ${open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+        <div className={`w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 flex flex-col ${open ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-95 pointer-events-none'}`}>
           <div className="p-5 border-b flex items-center justify-between gap-3">
             <div className="font-semibold">Финансы</div>
             <div className="flex items-center gap-2">
@@ -352,11 +409,39 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                       <YAxis hide />
                       <Tooltip contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }} />
                       <Legend />
-                      <Line type="monotone" dataKey="income" stroke="#22c55e" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="income" name="доход" stroke="#22c55e" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="expense" name="расход" stroke="#ef4444" strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+              </div>
+            </div>
+
+            {/* Hours by project and employee */}
+            <div className="rounded border p-3">
+              <div className="text-sm text-muted-foreground mb-2">Часы по проектам и сотрудникам</div>
+              <div className="max-h-56 overflow-auto border rounded">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-card">
+                    <tr className="text-left text-muted-foreground border-b">
+                      <th className="py-2 px-2">Проект</th>
+                      <th className="py-2 px-2">Сотрудник</th>
+                      <th className="py-2 px-2 text-right">Часы</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hoursTable.map((r, i) => (
+                      <tr key={`${r.projectId}:${r.employeeId}:${i}`} className="border-b last:border-b-0">
+                        <td className="py-2 px-2 whitespace-nowrap">{r.projectName}</td>
+                        <td className="py-2 px-2 whitespace-nowrap">{r.employeeName}</td>
+                        <td className="py-2 px-2 text-right">{r.hours.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                    {hoursTable.length === 0 && (
+                      <tr><td colSpan={3} className="py-3 text-center text-muted-foreground">Нет данных</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -381,7 +466,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Категория" value={category} onChange={(e)=>setCategory(e.target.value)} /></div>
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Теги (через запятую)" value={tags} onChange={(e)=>setTags(e.target.value)} /></div>
               <div className="md:col-span-3"><Select className="w-full" value={employeeId} onChange={setEmployeeId} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
-              <div className="md:col-span-7"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Описание" value={description} onChange={(e)=>setDescription(e.target.value)} /></div>
+              <div className="md:col-span-3"><Select className="w-full" value={projectId} onChange={setProjectId} options={[{value:'',label:'Проект'},...projects.map(p=>({value:p.id,label:p.name}))]} /></div>
+              <div className="md:col-span-4 md:col-start-1"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Описание" value={description} onChange={(e)=>setDescription(e.target.value)} /></div>
               <div className="md:col-span-2"><button className="h-9 w-full px-4 rounded border text-sm hover:bg-muted/40 inline-flex items-center justify-center gap-2" onClick={onAdd}><Plus className="h-4 w-4" /> Добавить</button></div>
             </div>
 
@@ -405,6 +491,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                <div className="md:col-span-2"><Select className="w-full" value={projectFilter} onChange={setProjectFilter} options={[{value:'',label:'Проект'},...projects.map(p=>({value:p.id,label:p.name}))]} /></div>
               <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder=">= сумма" type="number" value={minAmount} onChange={(e)=>setMinAmount(e.target.value)} /></div>
               <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="<= сумма" type="number" value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} /></div>
+              <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder=">= часы" type="number" step="0.1" value={minHours} onChange={(e)=>setMinHours(e.target.value)} /></div>
+              <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="<= часы" type="number" step="0.1" value={maxHours} onChange={(e)=>setMaxHours(e.target.value)} /></div>
               <div className="md:col-span-1"><Select className="w-full" value={sortBy} onChange={(v)=>setSortBy(v as any)} options={[{value:'date',label:'Дата'},{value:'amount',label:'Сумма'}]} /></div>
               <div className="md:col-span-2"><Select className="w-full" value={sortDir} onChange={(v)=>setSortDir(v as any)} options={[{value:'desc',label:'По убыв.'},{value:'asc',label:'По возр.'}]} /></div>
             </div>

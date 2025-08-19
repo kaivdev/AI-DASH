@@ -1,7 +1,7 @@
 import { ModuleCard } from '@/features/modules/ModuleCard'
 import { useEmployees } from '@/stores/useEmployees'
 import { formatCurrency } from '@/lib/format'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { EmployeeBoardDialog } from './EmployeeBoardDialog'
 import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
 import { EmployeeDetailDrawer } from './EmployeeDetailDrawer'
@@ -59,6 +59,7 @@ export function EmployeesCard() {
       revenue: revenue ? Number(revenue) : undefined,
       cost_hourly_rate: costHourly ? Number(costHourly) : undefined,
       bill_hourly_rate: billHourly ? Number(billHourly) : undefined,
+  planned_monthly_hours: plannedHours ? Number(plannedHours) : undefined,
       current_status: 'Новый сотрудник',
       status_tag: undefined,
       status_date: new Date().toISOString().slice(0, 10),
@@ -83,6 +84,13 @@ export function EmployeesCard() {
   }
 
   const detailEmployee = detailEmployeeId ? employees.find(e => e.id === detailEmployeeId) || null : null
+  const orderedEmployees = useMemo(() => {
+    return employees.slice().sort((a, b) => {
+      const ta = new Date(a.created_at || '').getTime() || 0
+      const tb = new Date(b.created_at || '').getTime() || 0
+      return tb - ta // newest first
+    })
+  }, [employees])
 
   return (
     <ModuleCard
@@ -214,7 +222,7 @@ export function EmployeesCard() {
 
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="space-y-2">
-            {employees.map((emp) => (
+            {orderedEmployees.map((emp) => (
               <div key={emp.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">
                   <div>
@@ -250,7 +258,7 @@ export function EmployeesCard() {
                 <div className="text-xs mb-2 inline-flex flex-wrap items-center gap-2">
                   {isAdmin && (<span className="px-1.5 py-0.5 rounded bg-muted">Себест.: {typeof (emp as any).cost_hourly_rate === 'number' ? `${(emp as any).cost_hourly_rate} ₽/ч` : '—'}</span>)}
                   {isAdmin && (<span className="px-1.5 py-0.5 rounded bg-muted">Биллинг: {typeof (emp as any).bill_hourly_rate === 'number' ? `${(emp as any).bill_hourly_rate} ₽/ч` : '—'}</span>)}
-                  <span className="px-1.5 py-0.5 rounded bg-muted">План: 160 ч/мес</span>
+                  <span className="px-1.5 py-0.5 rounded bg-muted">План: {typeof (emp as any).planned_monthly_hours === 'number' ? (emp as any).planned_monthly_hours : 160} ч/мес</span>
                 </div>
 
                 <div className="text-sm mb-2">
