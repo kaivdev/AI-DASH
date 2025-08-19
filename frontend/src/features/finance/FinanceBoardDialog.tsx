@@ -11,6 +11,7 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ResponsiveContainer, CartesianGrid, XAxis, YAxis, AreaChart, Area } from 'recharts'
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
+import TransactionsDataTable, { TransactionsDataTableHandle } from './TransactionsDataTable'
 
 export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolean; onClose: () => void; presetType: 'income' | 'expense' | null }) {
   const [show, setShow] = useState(false)
@@ -50,13 +51,13 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
 
   // selection
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  function toggleSelect(id: string) {
-    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  }
-  function selectAll(ids: string[]) {
-    setSelected(new Set(ids))
-  }
-  function clearSelection() { setSelected(new Set()) }
+  const tableRef = useRef<TransactionsDataTableHandle | null>(null)
+  function selectAll(ids: string[]) { setSelected(new Set(ids)) }
+  function clearSelection() { setSelected(new Set()); tableRef.current?.clearSelection() }
+
+  // Stable callbacks for child props to avoid re-creating table/columns every render
+  const handleDeleteTx = useMemo(() => (id: string) => remove(id), [remove])
+  const handleSelectionChange = useMemo(() => (ids: string[]) => setSelected(new Set(ids)), [])
 
   // Add period presets state
   const [preset, setPreset] = useState<'7'|'30'|'90'|'all'>('30')
@@ -553,62 +554,14 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
             </div>
 
             {/* Table */}
-            <div className="min-h-0 overflow-auto border rounded">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-card">
-                  <tr className="text-left text-muted-foreground border-b">
-                    <th className="py-2 pr-2 w-8"></th>
-                    <th className="py-2 pr-2">Дата</th>
-                    <th className="py-2 pr-2">Тип</th>
-                    <th className="py-2 pr-2 text-right">Сумма</th>
-                    <th className="py-2 pr-2">Категория</th>
-                    <th className="py-2 pr-2">Теги</th>
-                    <th className="py-2 pr-2">Сотрудник</th>
-          <th className="py-2 pr-2">Проект</th>
-                    <th className="py-2 pr-2">Описание</th>
-                    <th className="py-2 pr-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((t) => {
-                    const employee = (t as any).employee_id ? employees.find(e => e.id === (t as any).employee_id) : null
-          const project = (t as any).project_id ? projects.find(p => p.id === (t as any).project_id) : null
-                    const isSel = selected.has(t.id)
-                    const tagsArr = Array.isArray((t as any).tags) ? (t as any).tags : []
-                    return (
-                      <tr key={t.id} className="border-b last:border-0">
-                        <td className="py-2 pr-2 w-8"><Checkbox checked={isSel} onCheckedChange={()=> toggleSelect(t.id)} /></td>
-                        <td className="py-2 pr-2 whitespace-nowrap">{formatDate(t.date)}</td>
-                        <td className="py-2 pr-2">
-                          <span className={(t as any).transaction_type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                            {(t as any).transaction_type === 'income' ? 'доход' : 'расход'}
-                          </span>
-                        </td>
-                        <td className="py-2 pr-2 text-right font-medium">{formatCurrency(Math.round(t.amount), 'RUB')}</td>
-                        <td className="py-2 pr-2">{t.category || '-'}</td>
-                        <td className="py-2 pr-2">
-                          {tagsArr.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {tagsArr.map((tag: string, i: number) => (
-                                <span key={i} className="px-1 py-0.5 bg-gray-100 text-gray-700 dark:bg-purple-500/10 dark:text-purple-200 dark:ring-1 dark:ring-purple-500/20 rounded text-xs">
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          ) : '-'}
-                        </td>
-                        <td className="py-2 pr-2">{employee?.name || '-'}</td>
-            <td className="py-2 pr-2">{project?.name || '-'}</td>
-                        <td className="py-2 pr-2">{t.description || '-'}</td>
-                        <td className="py-2 pr-2 text-right">
-                          <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => remove(t.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <TransactionsDataTable
+              ref={tableRef as any}
+              data={filtered as any}
+              employees={employees as any}
+              projects={projects as any}
+              onDelete={handleDeleteTx}
+              onSelectionChange={handleSelectionChange}
+            />
           </div>
         </div>
       </div>
