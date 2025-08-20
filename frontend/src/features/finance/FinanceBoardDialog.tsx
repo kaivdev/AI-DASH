@@ -31,22 +31,11 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const [tags, setTags] = useState('')
   const [employeeId, setEmployeeId] = useState('')
   const [projectId, setProjectId] = useState('')
+  const [hours, setHours] = useState('')
 
-  // filters
-  const [query, setQuery] = useState('')
-  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all')
+  // filters: переносим в таблицу, оставляем только период пресетов
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [tagsFilter, setTagsFilter] = useState('')
-  const [employeeFilter, setEmployeeFilter] = useState('')
-  const [projectFilter, setProjectFilter] = useState('')
-  const [minAmount, setMinAmount] = useState('')
-  const [maxAmount, setMaxAmount] = useState('')
-  const [minHours, setMinHours] = useState('')
-  const [maxHours, setMaxHours] = useState('')
-  const [sortBy, setSortBy] = useState<'date' | 'amount'>('date')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [chartMode, setChartMode] = useState<'days' | 'months'>('days')
 
   // selection
@@ -60,16 +49,20 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const handleSelectionChange = useMemo(() => (ids: string[]) => setSelected(new Set(ids)), [])
 
   // Add period presets state
-  const [preset, setPreset] = useState<'7'|'30'|'90'|'all'>('30')
+  const [preset, setPreset] = useState<'7'|'30'|'90'|'all'>('all')
 
   // Apply preset to date filters
   useEffect(() => {
     const today = new Date()
-    const toISO = (d: Date) => d.toISOString().slice(0,10)
+    // local ISO date without UTC shift, e.g. 'YYYY-MM-DD'
+    const toLocalISO = (d: Date) => {
+      const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      return t.toISOString().slice(0, 10)
+    }
     if (preset === 'all') { setDateFrom(''); setDateTo(''); return }
     const n = preset==='7'?7:preset==='30'?30:90
     const start = new Date(today); start.setDate(today.getDate() - (n-1))
-    setDateFrom(toISO(start)); setDateTo(toISO(today))
+    setDateFrom(toLocalISO(start)); setDateTo(toLocalISO(today))
   }, [preset])
 
   const onCloseRef = useRef(onClose)
@@ -102,70 +95,76 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   }, [tasks])
 
   const filtered = useMemo(() => {
+    // Оставляем только ограничение по периоду; остальное фильтрует таблица
     return txs.filter((t) => {
-      if (filterType !== 'all' && (t as any).transaction_type !== filterType) return false
       if (dateFrom && t.date < dateFrom) return false
       if (dateTo && t.date > dateTo) return false
-      if (categoryFilter && !(t.category || '').toLowerCase().includes(categoryFilter.toLowerCase())) return false
-      if (tagsFilter) {
-        const tf = tagsFilter.toLowerCase()
-        const list = Array.isArray((t as any).tags) ? (t as any).tags : []
-        if (!list.some((tg: string) => (tg || '').toLowerCase().includes(tf))) return false
-      }
-      if (employeeFilter && (t as any).employee_id !== employeeFilter) return false
-      if (projectFilter && (t as any).project_id !== projectFilter) return false
-      if (query) {
-        const q = query.toLowerCase()
-        if (!(t.category || '').toLowerCase().includes(q) && !(t.description || '').toLowerCase().includes(q)) return false
-      }
-      const v = Number(t.amount)
-      if (minAmount && v < Number(minAmount)) return false
-      if (maxAmount && v > Number(maxAmount)) return false
-      // hours filter by linked task
-      const hours = (t as any).task_id ? (hoursByTask.get((t as any).task_id) ?? 0) : 0
-      if (minHours && hours < Number(minHours)) return false
-      if (maxHours && hours > Number(maxHours)) return false
       return true
-    }).sort((a, b) => {
-      const mul = sortDir === 'asc' ? 1 : -1
-      if (sortBy === 'date') return mul * a.date.localeCompare(b.date)
-      return mul * (a.amount - b.amount)
-    })
-  }, [txs, filterType, dateFrom, dateTo, categoryFilter, tagsFilter, employeeFilter, projectFilter, query, minAmount, maxAmount, minHours, maxHours, sortBy, sortDir, hoursByTask])
+    }).sort((a, b) => b.date.localeCompare(a.date))
+  }, [txs, dateFrom, dateTo])
 
   // charts
-  const lineData = useMemo(() => {
+  const { lineData, chartLabel } = useMemo(() => {
+    const txList = filtered // использовать уже ограниченный периодом список
+    const toLocalISO = (d: Date) => {
+      const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      return t.toISOString().slice(0, 10)
+    }
+
     if (chartMode === 'days') {
-      // 7 дней, сегодня по центру: -3 .. +3
+      // Строим диапазон по dateFrom/dateTo, если заданы, иначе 7 дней вокруг сегодня
+      let start: string
+      let end: string
+      if (dateFrom && dateTo) { start = dateFrom; end = dateTo }
+      else {
+        const today = new Date()
+        const s = new Date(today); s.setDate(today.getDate() - 3)
+        const e = new Date(today); e.setDate(today.getDate() + 3)
+        start = toLocalISO(s); end = toLocalISO(e)
+      }
+      // Сгенерировать список дней включительно
       const range: string[] = []
-      const today = new Date()
-      for (let offset = -3; offset <= 3; offset++) {
-        const d = new Date(today)
-        d.setDate(today.getDate() + offset)
-        range.push(d.toISOString().slice(0, 10))
+      const [sy, sm, sd] = start.split('-').map(Number)
+      const [ey, em, ed] = end.split('-').map(Number)
+      const cur = new Date(sy!, (sm! - 1), sd!)
+      const last = new Date(ey!, (em! - 1), ed!)
+      while (cur <= last) {
+        range.push(toLocalISO(cur))
+        cur.setDate(cur.getDate() + 1)
       }
       const daySum = new Map<string, { income: number; expense: number }>()
       for (const day of range) daySum.set(day, { income: 0, expense: 0 })
-  for (const t of txs) {
+      for (const t of txList) {
         if (!daySum.has(t.date)) continue
         const row = daySum.get(t.date)!
         if ((t as any).transaction_type === 'income') row.income += t.amount
         else row.expense += t.amount
         daySum.set(t.date, row)
       }
-      return range.map((day) => ({ date: day, ...daySum.get(day)! }))
+      return { lineData: range.map((day) => ({ date: day, ...daySum.get(day)! })), chartLabel: `${range.length} дн.` }
     }
-    // months mode: последние 6 месяцев, по месяцам (YYYY-MM)
+
+    // months mode: по месяцам в пределах dateFrom/dateTo или последние 6 мес
     const rangeM: string[] = []
-    const now = new Date()
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      rangeM.push(ym)
+    if (dateFrom && dateTo) {
+      const [sy, sm] = dateFrom.split('-').map(Number)
+      const [ey, em] = dateTo.split('-').map(Number)
+      let y = sy!, m = sm!
+      while (y < ey! || (y === ey! && m <= em!)) {
+        rangeM.push(`${y}-${String(m).padStart(2, '0')}`)
+        m++; if (m > 12) { m = 1; y++ }
+      }
+    } else {
+      const now = new Date()
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+        const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+        rangeM.push(ym)
+      }
     }
     const sumM = new Map<string, { income: number; expense: number }>()
     for (const m of rangeM) sumM.set(m, { income: 0, expense: 0 })
-    for (const t of txs) {
+    for (const t of txList) {
       const m = t.date.slice(0, 7)
       if (!sumM.has(m)) continue
       const row = sumM.get(m)!
@@ -173,8 +172,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
       else row.expense += t.amount
       sumM.set(m, row)
     }
-    return rangeM.map((m) => ({ date: m, ...sumM.get(m)! }))
-  }, [txs, chartMode])
+    return { lineData: rangeM.map((m) => ({ date: m, ...sumM.get(m)! })), chartLabel: `${rangeM.length} мес.` }
+  }, [filtered, chartMode, dateFrom, dateTo])
 
   // Hours table: aggregate task hours by project and employee (global or filtered by date range if possible)
   const hoursTable = useMemo(() => {
@@ -240,7 +239,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     const value = Number(amount)
     if (!Number.isFinite(value) || value <= 0) return
     add({ amount: value, transaction_type: type, date, category, description, tags: tags.split(',').map(t=>t.trim()).filter(Boolean), employee_id: employeeId || undefined, project_id: projectId || undefined } as any)
-    setAmount(''); setCategory(''); setDescription(''); setTags(''); setEmployeeId(''); setProjectId('')
+  setAmount(''); setCategory(''); setDescription(''); setTags(''); setEmployeeId(''); setProjectId(''); setHours('')
   }
 
   function exportCSV() {
@@ -398,7 +397,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
             {/* Chart: последние 7 дней */}
             <div className="rounded border p-3 min-w-0">
               <div className="text-sm text-muted-foreground mb-2 flex items-center justify-between gap-3">
-                <span>Динамика доходов/расходов — {chartMode === 'days' ? '7 дней' : '6 месяцев'}</span>
+                <span>Динамика доходов/расходов — {chartLabel}</span>
                 <div className="w-[140px]">
                   <Select
                     className="w-full"
@@ -439,22 +438,20 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                       <Area
                         dataKey="expense"
                         name="расход"
-                        type="natural"
+                        type="monotone"
                         fill="var(--color-expense)"
-                        fillOpacity={0.35}
+                        fillOpacity={0.3}
                         stroke="var(--color-expense)"
                         strokeWidth={2}
-                        stackId="a"
                       />
                       <Area
                         dataKey="income"
                         name="доход"
-                        type="natural"
+                        type="monotone"
                         fill="var(--color-income)"
-                        fillOpacity={0.35}
+                        fillOpacity={0.3}
                         stroke="var(--color-income)"
                         strokeWidth={2}
-                        stackId="a"
                       />
                       <ChartLegend content={<ChartLegendContent />} />
                     </AreaChart>
@@ -504,54 +501,29 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
               </div>
               <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Сумма" type="number" value={amount} onChange={(e)=>setAmount(e.target.value)} /></div>
               <div className="md:col-span-2"><Select className="w-full" value={type} onChange={(v)=> setType(v as any)} options={[{value:'income',label:'доход'},{value:'expense',label:'расход'}]} /></div>
-              <div className="md:col-span-2"><DatePicker 
-                date={date ? new Date(date) : undefined} 
-                onDateChange={(newDate) => setDate(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+              <div className="md:col-span-2"><DatePicker
+                date={date ? new Date(date) : undefined}
+                onDateChange={(newDate) => {
+                  if (!newDate) { setDate(''); return }
+                  const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                  setDate(t.toISOString().slice(0, 10))
+                }}
                 placeholder="Дата"
+                className="h-9 px-3 rounded border bg-background text-sm w-full"
               /></div>
+              <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Часы (опц.)" type="number" step="0.1" value={hours} onChange={(e)=>setHours(e.target.value)} /></div>
+              <div className="md:col-span-2"><Select className="w-full" value={employeeId} onChange={setEmployeeId} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
+              <div className="md:col-span-2"><Select className="w-full" value={projectId} onChange={setProjectId} options={[{value:'',label:'Проект'},...projects.map(p=>({value:p.id,label:p.name}))]} /></div>
+
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Категория" value={category} onChange={(e)=>setCategory(e.target.value)} /></div>
               <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Теги (через запятую)" value={tags} onChange={(e)=>setTags(e.target.value)} /></div>
-              <div className="md:col-span-3"><Select className="w-full" value={employeeId} onChange={setEmployeeId} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
-              <div className="md:col-span-3"><Select className="w-full" value={projectId} onChange={setProjectId} options={[{value:'',label:'Проект'},...projects.map(p=>({value:p.id,label:p.name}))]} /></div>
-              <div className="md:col-span-4 md:col-start-1"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Описание" value={description} onChange={(e)=>setDescription(e.target.value)} /></div>
+              <div className="md:col-span-4"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Описание" value={description} onChange={(e)=>setDescription(e.target.value)} /></div>
               <div className="md:col-span-2"><button className="h-9 w-full px-4 rounded border text-sm hover:bg-muted/40 inline-flex items-center justify-center gap-2" onClick={onAdd}><Plus className="h-4 w-4" /> Добавить</button></div>
             </div>
 
-            {/* Filters */}
-            <div className="p-4 border rounded bg-muted/5 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-              <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Поиск (категория/описание)" value={query} onChange={(e)=>setQuery(e.target.value)} /></div>
-              <div className="md:col-span-2"><Select className="w-full" value={filterType} onChange={(v)=>setFilterType(v as any)} options={[{value:'all',label:'Все'},{value:'income',label:'Доходы'},{value:'expense',label:'Расходы'}]} /></div>
-              <div className="md:col-span-2"><DatePicker 
-                date={dateFrom ? new Date(dateFrom) : undefined} 
-                onDateChange={(newDate) => setDateFrom(newDate ? newDate.toISOString().slice(0, 10) : '')} 
-                placeholder="От даты"
-              /></div>
-              <div className="md:col-span-2"><DatePicker 
-                date={dateTo ? new Date(dateTo) : undefined} 
-                onDateChange={(newDate) => setDateTo(newDate ? newDate.toISOString().slice(0, 10) : '')} 
-                placeholder="До даты"
-              /></div>
-              <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Категория" value={categoryFilter} onChange={(e)=>setCategoryFilter(e.target.value)} /></div>
-              <div className="md:col-span-3"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Теги" value={tagsFilter} onChange={(e)=>setTagsFilter(e.target.value)} /></div>
-                             <div className="md:col-span-2"><Select className="w-full" value={employeeFilter} onChange={setEmployeeFilter} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
-               <div className="md:col-span-2"><Select className="w-full" value={projectFilter} onChange={setProjectFilter} options={[{value:'',label:'Проект'},...projects.map(p=>({value:p.id,label:p.name}))]} /></div>
-              <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder=">= сумма" type="number" value={minAmount} onChange={(e)=>setMinAmount(e.target.value)} /></div>
-              <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="<= сумма" type="number" value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} /></div>
-              <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder=">= часы" type="number" step="0.1" value={minHours} onChange={(e)=>setMinHours(e.target.value)} /></div>
-              <div className="md:col-span-2"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="<= часы" type="number" step="0.1" value={maxHours} onChange={(e)=>setMaxHours(e.target.value)} /></div>
-              <div className="md:col-span-1"><Select className="w-full" value={sortBy} onChange={(v)=>setSortBy(v as any)} options={[{value:'date',label:'Дата'},{value:'amount',label:'Сумма'}]} /></div>
-              <div className="md:col-span-2"><Select className="w-full" value={sortDir} onChange={(v)=>setSortDir(v as any)} options={[{value:'desc',label:'По убыв.'},{value:'asc',label:'По возр.'}]} /></div>
-            </div>
+            {/* Filters removed (вся фильтрация и сортировка внутри таблицы). Оставили только пресеты диапазона в шапке. */}
 
-            {/* Bulk actions */}
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">Выбрано: {selected.size}</div>
-              <div className="flex items-center gap-2">
-                <button className="h-8 px-3 rounded border text-xs" disabled={selected.size===0} onClick={bulkDelete}>Удалить выбранные</button>
-                <button className="h-8 px-3 rounded border text-xs" onClick={()=> selectAll(filtered.map(t=>t.id))}>Выделить все</button>
-                <button className="h-8 px-3 rounded border text-xs" onClick={clearSelection}>Снять выделение</button>
-              </div>
-            </div>
+            {/* Bulk actions removed by request */}
 
             {/* Table */}
             <TransactionsDataTable
@@ -561,6 +533,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
               projects={projects as any}
               onDelete={handleDeleteTx}
               onSelectionChange={handleSelectionChange}
+              hoursByTask={hoursByTask}
             />
           </div>
         </div>

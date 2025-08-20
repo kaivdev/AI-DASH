@@ -27,16 +27,28 @@ export async function apiRequest<T>(endpoint: string, options: RequestInit = {})
     const response = await fetch(url, config)
     
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      // Try to read and include backend error details
+      let detail: any = null
+      try {
+        const ct = response.headers.get('content-type') || ''
+        if (ct.includes('application/json')) {
+          detail = await response.json()
+        } else {
+          detail = await response.text()
+        }
+      } catch {}
+      const err = new Error(`HTTP ${response.status} ${response.statusText} at ${endpoint}${detail ? `: ${typeof detail==='string'?detail:JSON.stringify(detail)}`:''}`)
+      if (__DEV__) console.error('[api] <= error', response.status, url, detail)
+      throw err
     }
     
-  // no content
+    // no content
     if (response.status === 204) return undefined as unknown as T
-  const json = await response.json()
-  if (__DEV__) console.debug('[api] <=', response.status, url)
-  return json
+    const json = await response.json()
+    if (__DEV__) console.debug('[api] <=', response.status, url)
+    return json
   } catch (error) {
-  console.error(`[api] ERROR ${endpoint}`, error)
+    console.error(`[api] ERROR ${endpoint}`, error)
     throw error
   }
 }

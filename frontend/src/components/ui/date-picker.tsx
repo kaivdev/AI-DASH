@@ -16,14 +16,16 @@ function toDayjs(value?: Date): Dayjs | undefined {
 }
 
 export function DatePicker({ date, onDateChange, placeholder, className, disabled }: Props) {
+  const base = 'h-9 px-3 rounded border bg-background text-sm w-full'
   return (
     <AntdDatePicker
       value={toDayjs(date)}
       format="DD.MM.YYYY"
       placeholder={placeholder}
-      className={className}
+      className={className ? `${base} ${className}` : base}
       disabled={disabled}
+      allowClear
       onChange={(d) => onDateChange?.(d ? d.toDate() : undefined)}
     />
   )
-} 
+}

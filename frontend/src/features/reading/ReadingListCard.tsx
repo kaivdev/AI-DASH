@@ -3,6 +3,16 @@ import { useReadingList } from '@/stores/useReadingList'
 import { useState } from 'react'
 import { Plus, X, Trash2, Play, CheckSquare, Pencil } from 'lucide-react'
 import { Select } from '@/components/Select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 export function ReadingListCard() {
   const items = useReadingList((s) => s.items)
@@ -23,6 +33,8 @@ export function ReadingListCard() {
   const [editId, setEditId] = useState<string>('')
   const [editTitle, setEditTitle] = useState('')
   const [editUrl, setEditUrl] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   function onAdd() {
     if (!title.trim()) return
@@ -237,13 +249,14 @@ export function ReadingListCard() {
                     </button>
                     <button 
                       className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-                      onClick={() => remove(item.id)}
+                      onClick={(e) => { e.stopPropagation?.(); setPendingDeleteId(item.id); setConfirmOpen(true) }}
                       title="Удалить" aria-label="Удалить"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
+                
 
                 <div className="flex gap-2">
                   {item.status === 'to_read' && (
@@ -273,6 +286,20 @@ export function ReadingListCard() {
           </div>
         </div>
       </div>
+      <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null) } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить из списка?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Это действие нельзя отменить. Элемент будет удален.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={async ()=>{ if(pendingDeleteId){ try { await remove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null) }}>Удалить</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ModuleCard>
   )
 } 

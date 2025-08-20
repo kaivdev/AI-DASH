@@ -53,7 +53,20 @@ export const useFinance = create<FinanceState>()(
         try {
           const updated = await transactionApi.update(id, patch) as Transaction
           set((s) => ({ txs: s.txs.map(t => t.id === id ? updated : t), loading: false }))
-        } catch (e) {
+        } catch (e: any) {
+          // Fallback for backend quirk: some deployments reject date in update (422 none_required)
+          const msg = (e && (e as Error).message) || ''
+          const hasDateIssue = msg.includes('"body","date"') && msg.includes('none_required')
+          if (hasDateIssue && (patch as any)?.date !== undefined) {
+            try {
+              const { date: _omit, ...rest } = (patch as any)
+              const updated = await transactionApi.update(id, rest) as Transaction
+              set((s) => ({ txs: s.txs.map(t => t.id === id ? updated : t), loading: false }))
+              return
+            } catch (e2) {
+              console.error('Retry update without date failed', e2)
+            }
+          }
           console.error('Failed to update transaction', e)
           set((s) => ({ txs: s.txs.map(t => t.id === id ? ({ ...t, ...(patch as any) }) : t), loading: false, error: 'Updated locally (API unavailable)' }))
         }

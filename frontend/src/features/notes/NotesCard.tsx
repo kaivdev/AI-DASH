@@ -5,6 +5,16 @@ import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { NotesDrawer } from './NotesDrawer'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 export function NotesCard() {
   const notes = useNotes((s) => s.notes)
@@ -16,6 +26,8 @@ export function NotesCard() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMode, setDrawerMode] = useState<'create'|'view'|'edit'>('create')
   const [currentNote, setCurrentNote] = useState<any>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   function openCreate() {
     setCurrentNote(null)
@@ -74,7 +86,7 @@ export function NotesCard() {
                     </button>
                   )}
                 {/* Edit pencil removed: clicking the card opens edit mode */}
-                <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={() => remove(n.id)} title="Удалить" aria-label="Удалить">
+                <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={(e) => { e.stopPropagation(); setPendingDeleteId(n.id); setConfirmOpen(true) }} title="Удалить" aria-label="Удалить">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
                 </div>
@@ -90,6 +102,20 @@ export function NotesCard() {
           onCreate={async (p) => { await add(p as any) }}
           onUpdate={async (id, patch) => { await update(id, patch as any) }}
         />
+        <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null) } }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Удалить заметку?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Это действие нельзя отменить. Заметка будет удалена.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+              <AlertDialogAction onClick={async ()=>{ if(pendingDeleteId){ try { await remove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null) }}>Удалить</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </ModuleCard>
   )

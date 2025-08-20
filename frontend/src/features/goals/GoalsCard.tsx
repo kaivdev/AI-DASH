@@ -3,6 +3,16 @@ import { useGoals } from '@/stores/useGoals'
 import { useState } from 'react'
 import { Plus, X, Trash2, PlusCircle, MinusCircle } from 'lucide-react'
 import { Select } from '@/components/Select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 export function GoalsCard() {
   const goals = useGoals((s) => s.goals)
@@ -15,6 +25,8 @@ export function GoalsCard() {
   const [description, setDescription] = useState('')
   const [period, setPeriod] = useState<'monthly' | 'quarterly' | 'yearly'>('quarterly')
   const [tags, setTags] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   function onAdd() {
     if (!title.trim()) return
@@ -128,6 +140,20 @@ export function GoalsCard() {
         )}
 
         <div className="min-h-0 flex-1 overflow-auto">
+          <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null) } }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Удалить цель?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Это действие нельзя отменить. Цель будет удалена.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+                <AlertDialogAction onClick={async ()=>{ if(pendingDeleteId){ try { await remove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null) }}>Удалить</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <div className="space-y-3">
             {goals.map((goal) => (
               <div key={goal.id} className="p-3 border rounded">
@@ -150,7 +176,7 @@ export function GoalsCard() {
                   </div>
                   <button 
                     className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-                    onClick={() => remove(goal.id)}
+                    onClick={() => { setPendingDeleteId(goal.id); setConfirmOpen(true) }}
                     title="Удалить" aria-label="Удалить"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -226,4 +252,4 @@ export function GoalsCard() {
       </div>
     </ModuleCard>
   )
-} 
+}

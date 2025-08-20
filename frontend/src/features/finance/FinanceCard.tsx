@@ -8,7 +8,7 @@ import { FinanceBoardDialog } from './FinanceBoardDialog'
 import { QuickAddTransactionDialog } from './QuickAddTransactionDialog'
 import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, AreaChart, Area } from 'recharts'
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
-import { Select } from '@/components/Select'
+// Select removed for static 7-day chart
 
 function getMonthKey(d: string) {
   return d.slice(0, 7) // YYYY-MM
@@ -23,7 +23,7 @@ export function FinanceCard() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
   const [presetType, setPresetType] = useState<'income' | 'expense' | null>(null)
-  const [chartMode, setChartMode] = useState<'days' | 'months'>('days')
+  // Static 7-day chart (no mode switch)
 
   useEffect(() => {
     fetchFinance().catch(()=>{})
@@ -52,46 +52,30 @@ export function FinanceCard() {
     return rows.sort((a,b)=> b.profit - a.profit)
   }, [txs, employees])
 
-  // Chart data: 7 дней вокруг сегодня или последние 6 месяцев
+  // Chart data: статичные 7 дней (локальное ISO, -3..+3 от сегодня)
   const chartData = useMemo(() => {
-    if (chartMode === 'days') {
-      const range: string[] = []
-      const today = new Date()
-      for (let offset = -3; offset <= 3; offset++) {
-        const d = new Date(today)
-        d.setDate(today.getDate() + offset)
-        range.push(d.toISOString().slice(0, 10))
-      }
-      const byDay = new Map<string, { date: string; income: number; expense: number }>()
-      for (const day of range) byDay.set(day, { date: day, income: 0, expense: 0 })
-      for (const t of txs) {
-        if (!byDay.has(t.date)) continue
-        const row = byDay.get(t.date)!
-        if ((t as any).transaction_type === 'income') row.income += t.amount
-        else row.expense += t.amount
-        byDay.set(t.date, row)
-      }
-      return range.map((day) => byDay.get(day)!)
+    const toLocalISO = (d: Date) => {
+      const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      return t.toISOString().slice(0, 10)
     }
-    // months mode
-    const rangeM: string[] = []
-    const now = new Date()
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      rangeM.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    const range: string[] = []
+    const today = new Date()
+    for (let offset = -3; offset <= 3; offset++) {
+      const d = new Date(today)
+      d.setDate(today.getDate() + offset)
+      range.push(toLocalISO(d))
     }
-    const byMonth = new Map<string, { date: string; income: number; expense: number }>()
-    for (const m of rangeM) byMonth.set(m, { date: m, income: 0, expense: 0 })
+    const byDay = new Map<string, { date: string; income: number; expense: number }>()
+    for (const day of range) byDay.set(day, { date: day, income: 0, expense: 0 })
     for (const t of txs) {
-      const m = t.date.slice(0, 7)
-      if (!byMonth.has(m)) continue
-      const row = byMonth.get(m)!
+      if (!byDay.has(t.date)) continue
+      const row = byDay.get(t.date)!
       if ((t as any).transaction_type === 'income') row.income += t.amount
       else row.expense += t.amount
-      byMonth.set(m, row)
+      byDay.set(t.date, row)
     }
-    return rangeM.map((m) => byMonth.get(m)!)
-  }, [txs, chartMode])
+    return range.map((day) => byDay.get(day)!)
+  }, [txs])
 
   // Last 8 transactions compact
   const lastTx = useMemo(() => txs.slice().sort((a,b)=> b.date.localeCompare(a.date)).slice(0,8), [txs])
@@ -101,41 +85,33 @@ export function FinanceCard() {
   setQuickOpen(true)
   }
 
-  // Trend vs previous period (days: last 7 vs prev 7; months: this month vs prev month)
+  // Trend vs previous period (days: last 7 vs prev 7)
   const trend = useMemo(() => {
     const today = new Date()
-    const toStr = (d: Date) => d.toISOString().slice(0,10)
+    const toLocalISO = (d: Date) => {
+      const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      return t.toISOString().slice(0,10)
+    }
     let currNet = 0
     let prevNet = 0
-    if (chartMode === 'days') {
-      const currStart = new Date(today); currStart.setDate(today.getDate() - 6)
-      const prevEnd = new Date(today); prevEnd.setDate(today.getDate() - 7)
-      const prevStart = new Date(today); prevStart.setDate(today.getDate() - 13)
-      const cs = toStr(currStart), ce = toStr(today)
-      const ps = toStr(prevStart), pe = toStr(prevEnd)
-      for (const t of txs) {
-        const d = t.date
-        if (d >= cs && d <= ce) currNet += (t as any).transaction_type === 'income' ? t.amount : -t.amount
-        else if (d >= ps && d <= pe) prevNet += (t as any).transaction_type === 'income' ? t.amount : -t.amount
-      }
-    } else {
-      const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-      const currYM = ym(today)
-      const prevD = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-      const prevYM = ym(prevD)
-      for (const t of txs) {
-        const m = t.date.slice(0,7)
-        if (m === currYM) currNet += (t as any).transaction_type === 'income' ? t.amount : -t.amount
-        else if (m === prevYM) prevNet += (t as any).transaction_type === 'income' ? t.amount : -t.amount
-      }
+    // Текущие 7 дней (включая сегодня)
+    const currStart = new Date(today); currStart.setDate(today.getDate() - 6)
+    const prevEnd = new Date(today); prevEnd.setDate(today.getDate() - 7)
+    const prevStart = new Date(today); prevStart.setDate(today.getDate() - 13)
+    const cs = toLocalISO(currStart), ce = toLocalISO(today)
+    const ps = toLocalISO(prevStart), pe = toLocalISO(prevEnd)
+    for (const t of txs) {
+      const d = t.date
+      if (d >= cs && d <= ce) currNet += (t as any).transaction_type === 'income' ? t.amount : -t.amount
+      else if (d >= ps && d <= pe) prevNet += (t as any).transaction_type === 'income' ? t.amount : -t.amount
     }
     const diff = currNet - prevNet
     const pct = prevNet === 0 ? 0 : Math.round((diff / Math.abs(prevNet)) * 100)
     return { pct, sign: Math.sign(diff) as -1 | 0 | 1 }
-  }, [txs, chartMode])
+  }, [txs])
 
   return (
-    <ModuleCard id="finance" title="Финансы" size="2x2" footer={<div className="text-xs flex items-center gap-2">Быстро:
+  <ModuleCard id="finance" title="Финансы" size="2x2" footer={<div className="text-xs flex items-center gap-2">Быстро:
       <button className="h-7 px-2 rounded border text-xs" onClick={() => openDialog('income')}>+ доход</button>
       <button className="h-7 px-2 rounded border text-xs" onClick={() => openDialog('expense')}>+ расход</button>
     </div>}>
@@ -159,16 +135,15 @@ export function FinanceCard() {
           </div>
         </div>
 
-        {/* Mini chart + trend */}
+        {/* Mini chart + trend (static 7 days) */}
         <div className="rounded border p-3">
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm text-muted-foreground inline-flex items-center gap-2">
-              Режим:
-              <div className="w-[120px]"><Select value={chartMode} onChange={(v)=> setChartMode(v as any)} options={[{value:'days',label:'Дни'},{value:'months',label:'Месяца'}]} /></div>
+              График: последние 7 дней
             </div>
             <div className={`text-xs inline-flex items-center gap-1 ${trend.sign>0?'text-green-500':trend.sign<0?'text-red-500':'text-muted-foreground'}`}>
               {trend.sign >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-              {trend.sign >= 0 ? '↑' : '↓'} {Math.abs(trend.pct)}% {chartMode==='days' ? 'к прошлой неделе' : 'к прошлому месяцу'}
+              {trend.sign >= 0 ? '↑' : '↓'} {Math.abs(trend.pct)}% к прошлой неделе
             </div>
           </div>
           <div className="h-28">
@@ -188,33 +163,27 @@ export function FinanceCard() {
                     axisLine={false}
                     tickMargin={8}
                     padding={{ left: 24, right: 24 }}
-                    tickFormatter={(value: string) =>
-                      chartMode === 'days'
-                        ? `${value.slice(8,10)}.${value.slice(5,7)}` // DD.MM
-                        : `${value.slice(5,7)}.${value.slice(2,4)}`   // MM.YY
-                    }
+                    tickFormatter={(value: string) => `${value.slice(8,10)}.${value.slice(5,7)}` /* DD.MM */}
                   />
                   <YAxis hide />
                   <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
                   <Area
                     dataKey="expense"
                     name="расход"
-                    type="natural"
+                    type="monotone"
                     fill="var(--color-expense)"
-                    fillOpacity={0.35}
+                    fillOpacity={0.3}
                     stroke="var(--color-expense)"
                     strokeWidth={2}
-                    stackId="a"
                   />
                   <Area
                     dataKey="income"
                     name="доход"
-                    type="natural"
+                    type="monotone"
                     fill="var(--color-income)"
-                    fillOpacity={0.35}
+                    fillOpacity={0.3}
                     stroke="var(--color-income)"
                     strokeWidth={2}
-                    stackId="a"
                   />
                   <ChartLegend content={<ChartLegendContent />} />
                 </AreaChart>

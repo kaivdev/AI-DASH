@@ -11,7 +11,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { ArrowUpDown, ChevronDown, MoreHorizontal, Trash2 } from 'lucide-react'
+import { ArrowUpDown, ChevronDown, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import type { Employee, Project, Transaction } from '@/types/core'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatCurrency, formatDate } from '@/lib/format'
+import QuickEditTransactionDialog from './QuickEditTransactionDialog'
 
 export type TransactionsDataTableHandle = {
   clearSelection: () => void
@@ -32,16 +33,18 @@ type Props = {
   projects: Project[]
   onDelete?: (id: string) => void
   onSelectionChange?: (ids: string[]) => void
+  hoursByTask?: Map<string, number> | Record<string, number>
 }
 
 type Row = Transaction & {
   employeeName?: string
   projectName?: string
   tagsText?: string
+  hours?: number
 }
 
 export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandle, Props>(
-  ({ data, employees, projects, onDelete, onSelectionChange }, ref) => {
+  ({ data, employees, projects, onDelete, onSelectionChange, hoursByTask }, ref) => {
   // debug: uncomment to trace renders
   // console.log('Component render', { dataLength: data.length, employeesLength: employees.length })
     
@@ -55,17 +58,27 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
       for (const e of memoEmployees) empName.set(e.id, e.name)
       const projName = new Map<string, string>()
       for (const p of memoProjects) projName.set(p.id, p.name)
+      const getHours = (taskId?: string) => {
+        if (!taskId) return undefined
+        if (!hoursByTask) return undefined
+        if (hoursByTask instanceof Map) return hoursByTask.get(taskId)
+        return (hoursByTask as Record<string, number>)[taskId]
+      }
       return memoData.map((t) => ({
         ...t,
         employeeName: t.employee_id ? empName.get(t.employee_id) || t.employee_id : '-',
         projectName: t.project_id ? projName.get(t.project_id) || t.project_id : '-',
         tagsText: Array.isArray(t.tags) ? t.tags.join(', ') : '',
+        hours: getHours(t.task_id),
       }))
-    }, [memoData, memoEmployees, memoProjects])
+    }, [memoData, memoEmployees, memoProjects, hoursByTask])
 
-    const handleDelete = React.useCallback((id: string) => {
+  const handleDelete = React.useCallback((id: string) => {
       onDelete?.(id)
     }, [onDelete])
+
+  const [editId, setEditId] = React.useState<string | null>(null)
+  const editTx = React.useMemo(() => rows.find(r => r.id === editId), [rows, editId])
 
   const columns = React.useMemo<ColumnDef<Row>[]>(() => [
       {
@@ -127,38 +140,159 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
       },
       {
         accessorKey: 'transaction_type',
-        header: 'Тип',
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            className="h-7 px-1 hover:bg-transparent"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Тип
+            <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+          </Button>
+        ),
         cell: ({ row }) => (
           <span className={row.getValue<'income' | 'expense'>('transaction_type') === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
             {row.getValue('transaction_type') === 'income' ? 'доход' : 'расход'}
           </span>
         ),
+        // сортируем по типу: expense (0) перед income (1) при возрастании
+        sortingFn: (rowA, rowB, columnId) => {
+          const val = (v: unknown) => (v === 'income' ? 1 : 0)
+          return val(rowA.getValue(columnId)) - val(rowB.getValue(columnId))
+        },
+        size: 96,
       },
       {
         accessorKey: 'amount',
         header: ({ column }) => (
           <div className="text-right">
-            <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+            <Button
+              variant="ghost"
+              className="h-7 px-1 hover:bg-transparent"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
               Сумма
-              <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
+              <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
             </Button>
           </div>
         ),
         cell: ({ row }) => {
           const v = Number(row.getValue('amount'))
-          return <div className="text-right font-medium">{formatCurrency(Math.round(v), 'RUB')}</div>
+          return <div className="text-right font-medium tabular-nums whitespace-nowrap">{formatCurrency(Math.round(v), 'RUB')}</div>
         },
         sortingFn: (rowA, rowB, columnId) => {
           const amountA = Number(rowA.getValue(columnId))
           const amountB = Number(rowB.getValue(columnId))
           return amountA - amountB
         },
+        size: 120,
       },
-      { accessorKey: 'category', header: 'Категория' },
-      { accessorKey: 'tagsText', header: 'Теги' },
-      { accessorKey: 'employeeName', header: 'Сотрудник' },
-      { accessorKey: 'projectName', header: 'Проект' },
-      { accessorKey: 'description', header: 'Описание' },
+      { accessorKey: 'category', header: 'Категория', filterFn: (row, id, value) => {
+        if (!value) return true
+        return String(row.getValue(id) ?? '').toLowerCase().includes(String(value).toLowerCase())
+      } },
+      {
+        accessorKey: 'hours',
+        header: ({ column }) => (
+          <div className="text-right">
+            <Button
+              variant="ghost"
+              className="h-7 px-1 hover:bg-transparent"
+              onClick={() => {
+                // First click -> descending (values сверху), second -> ascending
+                const isDesc = column.getIsSorted() === 'desc'
+                column.toggleSorting(isDesc ? false : true)
+              }}
+            >
+              Часы
+              <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+            </Button>
+          </div>
+        ),
+        cell: ({ row }) => {
+          const v = row.getValue<number | undefined>('hours')
+          return <div className="text-right tabular-nums whitespace-nowrap">{typeof v === 'number' ? Math.round(v) : '—'}</div>
+        },
+        // Всегда держим undefined внизу
+        sortUndefined: 'last',
+        sortingFn: (rowA, rowB, columnId) => {
+          const a = rowA.getValue<number | undefined>(columnId)
+          const b = rowB.getValue<number | undefined>(columnId)
+          if (typeof a !== 'number' && typeof b !== 'number') return 0
+          if (typeof a !== 'number') return 1
+          if (typeof b !== 'number') return -1
+          return a - b
+        },
+        size: 88,
+      },
+      { accessorKey: 'tagsText', header: 'Теги', filterFn: (row, id, value) => {
+        if (!value) return true
+        return String(row.getValue(id) ?? '').toLowerCase().includes(String(value).toLowerCase())
+      } },
+      {
+        accessorKey: 'employeeName',
+        header: ({ column }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <span className="inline-flex items-center gap-1 cursor-pointer select-none">
+                Сотрудник
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-[220px]">
+              <DropdownMenuLabel>Фильтр по сотруднику</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => column.setFilterValue(undefined)}>Все</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => column.setFilterValue('__none__')}>Без сотрудника</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {memoEmployees.map((e) => (
+                <DropdownMenuItem key={e.id} onClick={() => column.setFilterValue(e.id)}>
+                  {e.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+        // фильтрация по employee_id (или '__none__' если не указан)
+        filterFn: (row, _id, value) => {
+          if (!value) return true
+          const key = (row.original as any).employee_id || '__none__'
+          return key === value
+        },
+      },
+      {
+        accessorKey: 'projectName',
+        header: ({ column }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <span className="inline-flex items-center gap-1 cursor-pointer select-none">
+                Проект
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-[220px]">
+              <DropdownMenuLabel>Фильтр по проекту</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => column.setFilterValue(undefined)}>Все</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => column.setFilterValue('__none__')}>Без проекта</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {memoProjects.map((p) => (
+                <DropdownMenuItem key={p.id} onClick={() => column.setFilterValue(p.id)}>
+                  {p.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+        // фильтрация по project_id (или '__none__')
+        filterFn: (row, _id, value) => {
+          if (!value) return true
+          const key = (row.original as any).project_id || '__none__'
+          return key === value
+        },
+      },
+      { accessorKey: 'description', header: 'Описание', filterFn: (row, id, value) => {
+        if (!value) return true
+        return String(row.getValue(id) ?? '').toLowerCase().includes(String(value).toLowerCase())
+      } },
       {
         id: 'actions',
         enableHiding: false,
@@ -173,6 +307,9 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Действия</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => setEditId(row.original.id)}>
+                <Pencil className="mr-2 h-4 w-4" /> Редактировать
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigator.clipboard.writeText(row.original.id)}>Скопировать ID</DropdownMenuItem>
               <DropdownMenuSeparator />
               {handleDelete && (
@@ -184,10 +321,12 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
           </DropdownMenu>
         ),
       },
-  ], [handleDelete, onSelectionChange])
+  ], [handleDelete, onSelectionChange, memoEmployees, memoProjects])
 
-    const [sorting, setSorting] = React.useState<SortingState>([])
-    const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  const [sorting, setSorting] = React.useState<SortingState>([])
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  // Глобальный фильтр для быстрого поиска по нескольким полям (OR)
+  const [globalFilter, setGlobalFilter] = React.useState<string>("")
     const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
     const [rowSelection, setRowSelection] = React.useState({})
 
@@ -199,6 +338,7 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
       getRowId,
       onSortingChange: setSorting,
       onColumnFiltersChange: setColumnFilters,
+      onGlobalFilterChange: setGlobalFilter,
       getCoreRowModel: getCoreRowModel(),
       getPaginationRowModel: getPaginationRowModel(),
       getSortedRowModel: getSortedRowModel(),
@@ -207,11 +347,20 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
       onRowSelectionChange: setRowSelection,
       enableRowSelection: true,
       enableMultiRowSelection: true,
+      // Глобальная функция фильтра: OR по category, tagsText, description, employeeName, projectName
+      globalFilterFn: (row, _columnId, value) => {
+        const q = String(value ?? '').toLowerCase().trim()
+        if (!q) return true
+        const toS = (v: unknown) => String(v ?? '').toLowerCase()
+        const r = row.original as Row
+        return [r.category, r.tagsText, r.description, r.employeeName, r.projectName].some((f) => toS(f).includes(q))
+      },
       state: { 
         sorting, 
         columnFilters, 
         columnVisibility, 
-        rowSelection 
+        rowSelection,
+        globalFilter,
       },
       initialState: {
         sorting: [{ id: 'date', desc: true }],
@@ -257,14 +406,14 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
       getSelectedIds: () => table.getFilteredSelectedRowModel().rows.map((r) => r.original.id),
     }), [table])
 
-    return (
+  return (
       <div className="w-full">
-        <div className="flex items-center py-2">
+        <div className="flex items-center gap-2 py-2">
           <Input
-            placeholder="Фильтр по категории..."
-            value={(table.getColumn('category')?.getFilterValue() as string) ?? ''}
-            onChange={(event) => table.getColumn('category')?.setFilterValue(event.target.value)}
-            className="max-w-sm"
+            placeholder="Поиск: категория, теги, описание, сотрудник, проект..."
+            value={globalFilter}
+            onChange={(event) => table.setGlobalFilter(event.target.value)}
+            className="max-w-lg"
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -336,6 +485,9 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
             </Button>
           </div>
         </div>
+        {editTx && (
+          <QuickEditTransactionDialog open={!!editId} onClose={() => setEditId(null)} tx={editTx} />
+        )}
       </div>
     )
   }

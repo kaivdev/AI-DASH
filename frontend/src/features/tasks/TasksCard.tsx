@@ -5,7 +5,16 @@ import { useProjects } from '@/stores/useProjects'
 import { formatDate } from '@/lib/format'
 import { useMemo, useState, useEffect } from 'react'
 import type { Task, Priority } from '@/types/core'
-import { ConfirmDialog } from '@/app/ConfirmDialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { TaskDetailDialog } from './TaskDetailDialog'
 import { Pencil, Trash2, Plus, X, Kanban, Play, Pause } from 'lucide-react'
 import { DatePicker } from '@/components/ui/date-picker'
@@ -297,22 +306,26 @@ export function TasksCard() {
       }
     >
       <div className="flex flex-col gap-4 h-full min-h-0">
-        <ConfirmDialog
-          open={confirmOpen}
-          title="Удалить задачу?"
-          description="Это действие нельзя отменить. Задача будет удалена."
-          confirmText="Удалить"
-          cancelText="Отмена"
-          variant="danger"
-          onCancel={() => { setConfirmOpen(false); setPendingDeleteId(null) }}
-          onConfirm={async () => {
-            if (pendingDeleteId) {
-              try { await remove(pendingDeleteId) } catch {}
-            }
-            setConfirmOpen(false)
-            setPendingDeleteId(null)
-          }}
-        />
+        <AlertDialog open={confirmOpen} onOpenChange={(open)=>{ if(!open) { setConfirmOpen(false); setPendingDeleteId(null) } }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Удалить задачу?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Это действие нельзя отменить. Задача будет удалена.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => { setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+              <AlertDialogAction onClick={async ()=>{
+                if (pendingDeleteId) {
+                  try { await remove(pendingDeleteId) } catch {}
+                }
+                setConfirmOpen(false)
+                setPendingDeleteId(null)
+              }}>Удалить</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <TaskDetailDialog
           open={detailOpen}

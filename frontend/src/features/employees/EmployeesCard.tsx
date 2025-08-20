@@ -6,6 +6,16 @@ import { EmployeeBoardDialog } from './EmployeeBoardDialog'
 import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
 import { EmployeeDetailDrawer } from './EmployeeDetailDrawer'
 import { useAuth } from '@/stores/useAuth'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 export function EmployeesCard() {
   const employees = useEmployees((s) => s.employees)
@@ -36,6 +46,8 @@ export function EmployeesCard() {
 
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchEmployees()
@@ -123,7 +135,7 @@ export function EmployeesCard() {
         employee={detailEmployee}
         onClose={() => setDetailOpen(false)}
         onEdit={async (id, patch) => { try { await update(id, patch) } catch {} }}
-        onDelete={async (id) => { if (!isAdmin) return; try { await remove(id) } catch {} setDetailOpen(false) }}
+        onDelete={async (id) => { if (!isAdmin) return; setPendingDeleteId(id); setConfirmOpen(true) }}
         onUpdateStatus={async (id, s, t) => { try { await updateStatus(id, s, t) } catch {} }}
   isAdmin={isAdmin}
       />
@@ -235,7 +247,7 @@ export function EmployeesCard() {
                   {isAdmin && (
                     <button 
                       className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-                      onClick={() => remove(emp.id)}
+                      onClick={() => { setPendingDeleteId(emp.id); setConfirmOpen(true) }}
                       title="Удалить" aria-label="Удалить"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -347,6 +359,20 @@ export function EmployeesCard() {
           </div>
         </div>
       </div>
+      <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null) } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить сотрудника?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Это действие нельзя отменить. Сотрудник будет удален.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={async ()=>{ if(pendingDeleteId){ try { await remove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null); setDetailOpen(false) }}>Удалить</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ModuleCard>
   )
 }

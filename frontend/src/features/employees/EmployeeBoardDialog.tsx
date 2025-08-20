@@ -2,6 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Employee } from '@/types/core'
 import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Select } from '@/components/Select'
 
 interface EmployeeBoardDialogProps {
@@ -16,6 +26,8 @@ interface EmployeeBoardDialogProps {
 
 export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove, onUpdateStatus, isAdmin }: EmployeeBoardDialogProps) {
   const [show, setShow] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   const [name, setName] = useState('')
   const [position, setPosition] = useState('')
@@ -123,7 +135,7 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
                       <div className="text-xs text-muted-foreground">{e.position} • {e.email}</div>
                     </div>
                     {isAdmin && (
-                      <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={() => onRemove(e.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
+                      <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={() => { setPendingDeleteId(e.id); setConfirmOpen(true) }} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
                     )}
                   </div>
                   <div className="mt-2 flex items-center gap-2 text-xs">
@@ -141,6 +153,20 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
               {filtered.length === 0 && (<div className="p-6 text-center text-sm text-muted-foreground">Ничего не найдено</div>)}
             </div>
           </div>
+          <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null) } }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Удалить сотрудника?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Это действие нельзя отменить. Сотрудник будет удален.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+                <AlertDialogAction onClick={async ()=>{ if(pendingDeleteId){ try { await onRemove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null) }}>Удалить</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     </div>
