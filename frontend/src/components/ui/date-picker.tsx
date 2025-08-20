@@ -1,6 +1,7 @@
 import React from 'react'
 import { DatePicker as AntdDatePicker } from 'antd'
 import dayjs, { Dayjs } from 'dayjs'
+import { ConfigProvider } from 'antd'
 
 interface Props {
   date?: Date
@@ -18,7 +19,16 @@ function toDayjs(value?: Date): Dayjs | undefined {
 export function DatePicker({ date, onDateChange, placeholder, className, disabled }: Props) {
   const base = 'h-9 px-3 rounded border bg-background text-sm w-full'
   
-  return (
+
+
+return (
+  <ConfigProvider
+    theme={{
+      token: {
+        colorPrimary: "var(--primary)"
+      }
+    }}
+  >
     <AntdDatePicker
       value={toDayjs(date)}
       defaultPickerValue={toDayjs(date) || dayjs()}
@@ -33,5 +43,6 @@ export function DatePicker({ date, onDateChange, placeholder, className, disable
         onDateChange?.(d ? d.toDate() : undefined)
       }}
     />
-  )
+  </ConfigProvider>
+)
 }

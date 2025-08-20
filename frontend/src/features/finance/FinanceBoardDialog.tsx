@@ -413,8 +413,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
               <div className="h-56">
                 <ChartContainer
                   config={{
-                    income: { label: 'Доход', color: 'var(--chart-1, #22c55e)' },
-                    expense: { label: 'Расход', color: 'var(--chart-2, #ef4444)' },
+                    income: { label: 'Доход', color: 'hsl(var(--chart-1))' },
+                    expense: { label: 'Расход', color: 'hsl(var(--chart-2))' },
                   }}
                   className="h-full"
                 >

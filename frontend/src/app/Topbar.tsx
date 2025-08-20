@@ -5,13 +5,10 @@ import { useAuth } from '@/stores/useAuth'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTasks } from '@/stores/useTasks'
-import { useSettings } from '@/stores/useSettings'
-import { Moon, Sun, Menu, Plus, Trash2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Pencil } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Drawer } from '@/components/ui/drawer'
-import { registry, type ModuleKey } from '@/features/modules/registry'
-import { useModules } from '@/stores/useModules'
-import { Checkbox } from '@/components/ui/checkbox'
+import { SidebarTrigger } from '@/components/ui/sidebar'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 export function Topbar() {
   const user = useAuth((s) => s.user)
@@ -20,47 +17,26 @@ export function Topbar() {
   const [aiOpen, setAiOpen] = useState(false)
   const [aiDraft, setAiDraft] = useState('')
   const [initialQuery, setInitialQuery] = useState<string>('')
-  const theme = useSettings((s) => s.theme)
-  const setTheme = useSettings((s) => s.setTheme)
-  // autoAlign removed from topbar menu - controlled by defaults/migration
-  const [menuOpen, setMenuOpen] = useState(false)
-
-  const enabled = useModules((s) => s.enabled)
-  const enable = useModules((s) => s.enable)
-  const disable = useModules((s) => s.disable)
 
   function openChat(autoQuery?: string) {
     setInitialQuery((autoQuery || '').trim())
     setAiOpen(true)
   }
 
-  function toggleTheme() {
-    const next = theme === 'dark' ? 'light' : 'dark'
-    // apply immediately to avoid flicker
-    const root = document.documentElement
-    if (next === 'dark') root.classList.add('dark')
-    else root.classList.remove('dark')
-    setTheme(next)
-  }
-
-  const enabledKeys = new Set(enabled.map((m) => m.key))
-
   return (
     <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container h-14 flex items-center gap-4">
-        <button
-          onClick={() => setMenuOpen(true)}
-          className="h-8 w-8 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-          aria-label="Открыть меню"
-          title="Меню"
-        >
-          <Menu className="h-4 w-4" />
-        </button>
+        <SidebarTrigger />
         <Link to="/" className="font-semibold hover:underline whitespace-nowrap">AI Life Dashboard</Link>
         <div className="flex-1 flex justify-center">
           {user && (
             <div className="w-full max-w-xl">
               <input
+                id="ai-chat-input"
+                name="ai-chat-input"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
                 className="h-9 w-full px-4 rounded-full border bg-background text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
                 placeholder="Чат с ИИ… задайте вопрос или команду"
                 value={aiDraft}
@@ -77,65 +53,12 @@ export function Topbar() {
           )}
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={toggleTheme}
-            className="h-8 w-8 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-            aria-label="Переключить тему"
-          >
-            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
+          <ThemeToggle />
           {!user && (
             <Link to="/login" className="h-8 px-3 rounded border text-sm inline-flex items-center justify-center hover:bg-muted/40">Войти</Link>
           )}
         </div>
       </div>
-
-      <Drawer open={menuOpen} onClose={() => setMenuOpen(false)} side="left" title="Меню" widthClassName="w-[92vw] max-w-md">
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <div className="text-sm font-medium text-muted-foreground">Навигация</div>
-            {user && (
-              <>
-                <Link to="/" onClick={() => setMenuOpen(false)} className="block rounded border px-3 py-2 hover:bg-muted/40">
-                  Дашборд
-                </Link>
-                <Link to="/kanban" onClick={() => setMenuOpen(false)} className="block rounded border px-3 py-2 hover:bg-muted/40">
-                  Kanban Board
-                </Link>
-              </>
-            )}
-            {user ? (
-              <Link to="/account" onClick={() => setMenuOpen(false)} className="block rounded border px-3 py-2 hover:bg-muted/40">
-                Профиль: {user.name}
-              </Link>
-            ) : (
-              <Link to="/login" onClick={() => setMenuOpen(false)} className="block rounded border px-3 py-2 hover:bg-muted/40">
-                Войти
-              </Link>
-            )}
-            {/* autoAlign control removed from menu */}
-          </div>
-
-          {user && (
-            <div className="space-y-2">
-              <div className="text-sm font-medium text-muted-foreground">Модули</div>
-              <div className="space-y-2">
-                {Object.keys(registry).map((key) => {
-                  const k = key as ModuleKey
-                  const isOn = enabledKeys.has(k)
-                  return (
-                    <label key={k} className="flex items-center justify-between rounded border px-3 py-2 hover:bg-muted/30">
-                      <div className="font-medium capitalize">{k}</div>
-                      <Checkbox checked={isOn} onCheckedChange={() => (isOn ? disable(k) : enable(k))} />
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </Drawer>
 
       {aiOpen && createPortal(
         <AIChatModal
