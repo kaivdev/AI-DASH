@@ -37,8 +37,8 @@ export function ConfirmDialog({
   const node = (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" onClick={onCancel} />
-      <div className="absolute inset-0 flex items-center justify-center p-5">
-        <div className="w-full max-w-md rounded-lg border bg-background shadow-xl">
+      <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-none">
+        <div className="w-full max-w-md rounded-lg border bg-background shadow-xl pointer-events-auto">
           <div className="px-5 pt-3 pb-4">
             <h3 className="text-xl font-semibold">{title}</h3>
             {description && (

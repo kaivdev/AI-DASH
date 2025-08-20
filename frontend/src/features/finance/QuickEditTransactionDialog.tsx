@@ -85,8 +85,8 @@ export function QuickEditTransactionDialog({ open, onClose, tx }: { open: boolea
   const node = (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
       <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} onClick={onClose} />
-      <div className="absolute inset-0 flex items-center justify-center p-6">
-        <div className={`w-full max-w-2xl overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 ${open ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-95 pointer-events-none'}`}>
+      <div className="absolute inset-0 flex items-center justify-center p-6 pointer-events-none">
+        <div className={`w-full max-w-2xl overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 pointer-events-auto ${open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
           <div className="p-4 border-b flex items-center justify-between">
             <div className="font-semibold">Редактирование транзакции</div>
             <div className="flex items-center gap-2">

@@ -174,7 +174,30 @@ interface ProjectDetailDrawerProps {
 
                      {/* Summary by member */}
            <div className="pt-3 mt-2 border-t">
-             <div className="text-xs text-muted-foreground mb-2">Сводка по участникам</div>
+             <div className="text-xs text-muted-foreground mb-2">Сводка по проекту</div>
+             {(() => {
+               const allProjectTasks = tasks.filter(t => t.project_id === p.id)
+               const totalOpen = allProjectTasks.filter(t => !t.done).length
+               const totalDone = allProjectTasks.filter(t => t.done).length
+               const totalHours = allProjectTasks.reduce((s, t) => s + (t.hours_spent || 0), 0)
+               const totalMoney = allProjectTasks.filter(t => t.billable).reduce((s, t) => s + ((((t as any).applied_bill_rate ?? (t as any).bill_rate_override) ?? 0) * (t.hours_spent || 0)), 0)
+               
+               return (
+                 <div className="mb-3 p-3 rounded border bg-muted/5">
+                   <div className="flex items-center justify-between">
+                     <div className="text-sm font-medium">Общая статистика</div>
+                     <div className="inline-flex items-center gap-3 text-sm">
+                       <span className="px-2 py-1 rounded bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-300">в работе {totalOpen}</span>
+                       <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300">готово {totalDone}</span>
+                       <span className="px-2 py-1 rounded bg-purple-100 text-purple-800 dark:bg-purple-500/10 dark:text-purple-300">{totalHours} ч</span>
+                       <span className="px-2 py-1 rounded bg-orange-100 text-orange-800 dark:bg-orange-500/10 dark:text-orange-300">{totalMoney} ₽</span>
+                     </div>
+                   </div>
+                 </div>
+               )
+             })()}
+             
+             <div className="text-xs text-muted-foreground mb-2">По участникам</div>
              <div className="space-y-2 text-sm">
                {p.member_ids.map(id => {
                  const memberTasks = tasks.filter(t => t.project_id === p.id && t.assigned_to === id)
@@ -273,11 +296,15 @@ interface ProjectDetailDrawerProps {
 
           <div className="pt-2 border-t">
             <div className="text-xs text-muted-foreground mb-1">Добавить ссылку</div>
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
-              <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-2" placeholder="Название" value={linkTitle} onChange={(e)=>setLinkTitle(e.target.value)} />
-              <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-3" placeholder="https://..." value={linkUrl} onChange={(e)=>setLinkUrl(e.target.value)} />
-              <Select value={linkType} onChange={(v)=>setLinkType(v as any)} options={[{value:'repo',label:'Репозиторий'},{value:'docs',label:'Документация'},{value:'design',label:'Дизайн'},{value:'other',label:'Другое'}]} />
-              <div className="md:col-span-6 flex justify-end">
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input className="h-9 px-3 rounded border bg-background text-sm" placeholder="Название" value={linkTitle} onChange={(e)=>setLinkTitle(e.target.value)} />
+                <input className="h-9 px-3 rounded border bg-background text-sm" placeholder="https://..." value={linkUrl} onChange={(e)=>setLinkUrl(e.target.value)} />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <Select value={linkType} onChange={(v)=>setLinkType(v as any)} options={[{value:'repo',label:'Репозиторий'},{value:'docs',label:'Документация'},{value:'design',label:'Дизайн'},{value:'other',label:'Другое'}]} />
+                </div>
                 <button className="h-9 px-4 rounded border text-sm inline-flex items-center gap-2" onClick={handleAddLink}><Plus className="h-4 w-4" /> Добавить</button>
               </div>
             </div>

@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Drawer } from '@/components/ui/drawer'
-import { Trash2, Pencil, Save, X as CloseIcon, ArrowUpRight } from 'lucide-react'
+import { Trash2, Pencil, Save, X as CloseIcon, ArrowUpRight, Users, Clock, TrendingUp, DollarSign, Target, BarChart3 } from 'lucide-react'
 import type { Employee } from '@/types/core'
+import { useProjects } from '@/stores/useProjects'
+import { useTasks } from '@/stores/useTasks'
+import { useFinance } from '@/stores/useFinance'
+import { calculateEmployeeStats, formatCurrency, formatHours } from './employeeUtils'
 
 interface EmployeeDetailDrawerProps {
   open: boolean
@@ -26,6 +30,25 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
 
   const [status, setStatus] = useState('')
   const [statusTag, setStatusTag] = useState('')
+
+  // Получаем данные из сторов
+  const { projects, fetchAll: fetchProjects } = useProjects()
+  const { tasks, fetchTasks } = useTasks()
+  const { txs: transactions, fetch: fetchTransactions } = useFinance()
+
+  // Загружаем данные при открытии дравера
+  useEffect(() => {
+    if (open) {
+      fetchProjects()
+      fetchTasks()
+      fetchTransactions()
+    }
+  }, [open, fetchProjects, fetchTasks, fetchTransactions])
+
+  // Вычисляем статистику сотрудника
+  const employeeStats = employee 
+    ? calculateEmployeeStats(employee, projects, tasks, transactions)
+    : null
 
   useEffect(() => {
     if (employee) {
@@ -120,6 +143,101 @@ export function EmployeeDetailDrawer({ open, employee, onClose, onEdit, onDelete
                </div>
              )}
            </div>
+
+          {/* Статистика сотрудника */}
+          {employeeStats && (
+            <div className="pt-4 border-t space-y-4">
+              <div className="text-sm font-medium">Статистика</div>
+              
+              {/* Основная статистика */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded border bg-background">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                    <Clock className="h-3 w-3" />
+                    Отработано часов
+                  </div>
+                  <div className="text-lg font-semibold">{formatHours(employeeStats.totalHours)}</div>
+                </div>
+                
+                <div className="p-3 rounded border bg-background">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                    <TrendingUp className="h-3 w-3" />
+                    Принес прибыли
+                  </div>
+                  <div className="text-lg font-semibold text-green-600">{formatCurrency(employeeStats.totalRevenue)}</div>
+                </div>
+
+                <div className="p-3 rounded border bg-background">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                    <DollarSign className="h-3 w-3" />
+                    Расходы на ЗП
+                  </div>
+                  <div className="text-lg font-semibold text-orange-600">{formatCurrency(employeeStats.totalSalaryCost)}</div>
+                </div>
+
+                <div className="p-3 rounded border bg-background">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                    <BarChart3 className="h-3 w-3" />
+                    Маржа прибыли
+                  </div>
+                  <div className="text-lg font-semibold">{employeeStats.profitMargin.toFixed(1)}%</div>
+                </div>
+              </div>
+
+              {/* Активные проекты */}
+              <div>
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <Users className="h-4 w-4" />
+                  Активные проекты ({employeeStats.activeProjects.length})
+                </div>
+                <div className="space-y-2 max-h-24 overflow-auto">
+                  {employeeStats.activeProjects.length > 0 ? (
+                    employeeStats.activeProjects.map(project => (
+                      <div key={project.id} className="p-2 rounded border bg-background text-sm">
+                        <div className="font-medium">{project.name}</div>
+                        <div className="text-xs text-muted-foreground">{project.status}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-muted-foreground">Нет активных проектов</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Статистика задач */}
+              <div>
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <Target className="h-4 w-4" />
+                  Задачи
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2 rounded border bg-background text-center">
+                    <div className="text-lg font-semibold text-green-600">{employeeStats.completedTasks}</div>
+                    <div className="text-xs text-muted-foreground">Выполнено</div>
+                  </div>
+                  <div className="p-2 rounded border bg-background text-center">
+                    <div className="text-lg font-semibold text-blue-600">{employeeStats.inProgressTasks}</div>
+                    <div className="text-xs text-muted-foreground">В работе</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Дополнительная информация */}
+              <div>
+                <div className="text-sm font-medium mb-2">Дополнительно</div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Стоимость часа:</span>
+                    <span>{formatCurrency(employeeStats.actualHourlyRate)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Доходность в час:</span>
+                    <span>{formatCurrency(employeeStats.revenuePerHour)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="pt-2 border-t space-y-2">
             <div className="text-xs text-muted-foreground">Статус</div>

@@ -108,27 +108,6 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
   const md = React.useMemo(() => new MarkdownIt({ html: false, linkify: true, breaks: true }), [])
   const [localContent, setLocalContent] = React.useState<string>(note?.content || '')
 
-  // Подсветка в WYSIWYG: применить highlight.js ко всем <pre><code>
-  const runWysiwygHighlight = React.useCallback(() => {
-    try {
-      const anyEditor = editor as any
-      const wysiwyg = anyEditor?.wysiwygEditor
-      const root: HTMLElement | undefined = wysiwyg?.dom
-      if (!root) return
-      const codeBlocks = root.querySelectorAll('pre code') as NodeListOf<HTMLElement>
-      codeBlocks.forEach((codeEl) => {
-        try {
-          // Не трогаем уже подсвеченные/сформатированные (во избежание мерцаний и предупреждений)
-          if (codeEl.getAttribute('data-hljs') === 'done') return
-          // Если внутри уже есть теги (нечистый текст), пропускаем — это может быть разметка редактора
-          if (codeEl.childElementCount > 0) return
-          hljs.highlightElement(codeEl)
-          codeEl.setAttribute('data-hljs', 'done')
-        } catch {}
-      })
-    } catch {}
-  }, [editor])
-
   React.useEffect(() => {
     if (!open) return
     const value = note?.content || ''
@@ -137,50 +116,15 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
     setLocalContent(value)
     setIsEditing(true)
     // На всякий случай синхронизируем текущее содержимое (если id тот же)
-    let tA: number | undefined
-    let tB: number | undefined
     try {
       editor.replace(value)
-      // Сразу после установки значения подсветим
-      runWysiwygHighlight()
-      // После кадра и через небольшую задержку — если DOM дорисуется позже
-      requestAnimationFrame(() => runWysiwygHighlight())
-      tA = window.setTimeout(runWysiwygHighlight, 30)
-      tB = window.setTimeout(runWysiwygHighlight, 120)
     } catch (err) {
       // ignore: editor будет создан заново по deps
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    return () => { if (tA) clearTimeout(tA); if (tB) clearTimeout(tB) }
+    return () => {}
   }, [open, note?.id, note?.content])
-
-  // Подсветка кода прямо в WYSIWYG: применяем highlight.js к <pre><code> внутри dom редактора
-  React.useEffect(() => {
-    const rehighlight = () => runWysiwygHighlight()
-
-    // первичная подсветка и несколько ретраев после монтирования
-    rehighlight()
-    requestAnimationFrame(rehighlight)
-    const t1 = window.setTimeout(rehighlight, 30)
-    const t2 = window.setTimeout(rehighlight, 120)
-    // события редактора
-    // @ts-ignore runtime events exist
-    editor.on?.('change', rehighlight)
-    // @ts-ignore дополнительные перерисовки тулбаров/вью
-    editor.on?.('rerender', rehighlight)
-    // @ts-ignore
-    editor.on?.('change-editor-mode', rehighlight)
-    return () => {
-      if (t1) clearTimeout(t1)
-      if (t2) clearTimeout(t2)
-      // @ts-ignore
-      editor.off?.('change', rehighlight)
-      // @ts-ignore
-      editor.off?.('rerender', rehighlight)
-      // @ts-ignore
-      editor.off?.('change-editor-mode', rehighlight)
-    }
-  }, [editor, open, runWysiwygHighlight])
+  // Внимание: не применяем highlight.js внутри WYSIWYG, чтобы не ломать редактирование
 
   const handleSubmit = async () => {
     const content = (editor.getValue?.() || '').toString()
@@ -214,7 +158,7 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
             <span>Поделиться со всеми</span>
           </div>
         </div>
-        <div className="flex-1 min-h-0 border rounded overflow-hidden">
+  <div className="flex-1 min-h-0 border rounded overflow-hidden" dir="ltr">
           <MarkdownEditorView
             key={`${note?.id || 'new'}-edit-${open ? 'open' : 'closed'}`}
             stickyToolbar

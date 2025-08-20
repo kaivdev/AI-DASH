@@ -100,6 +100,23 @@
     background-color: hsl(var(--background));
   }
 
+  /* Force readable colors in dark theme for editor */
+  .dark .g-md-editor,
+  .dark .g-md-editor .milkdown,
+  .dark .g-md-editor .ProseMirror { color: hsl(var(--foreground)) !important; }
+  .dark .g-md-editor a { color: hsl(var(--primary)); }
+
+  /* Ant Design Drawer: inherit proper dark colors */
+  .dark .ant-drawer .ant-drawer-body {
+    color: hsl(var(--foreground));
+    background-color: hsl(var(--background));
+  }
+  .dark .ant-drawer .ant-drawer-header,
+  .dark .ant-drawer .ant-drawer-title {
+    color: hsl(var(--foreground));
+    background-color: hsl(var(--background));
+  }
+
   /* Selection color inside editor */
   .g-md-editor .ProseMirror ::selection { background-color: hsl(var(--primary) / 0.25); }
 
@@ -118,4 +135,20 @@
   .dark .hljs-name,
   .dark .hljs-type,
   .dark .hljs-attribute { color: #a5d6ff; }
+
+  /* Enforce LTR direction in markdown editor to prevent mirrored typing */
+  .g-md-editor,
+  .g-md-editor .milkdown,
+  .g-md-editor .ProseMirror {
+    direction: ltr;
+    unicode-bidi: plaintext;
+  }
+
+  /* Specifically ensure code blocks are LTR while editing */
+  .g-md-editor .ProseMirror pre,
+  .g-md-editor .ProseMirror pre code {
+    direction: ltr !important;
+    unicode-bidi: plaintext !important;
+    text-align: left;
+  }
 }

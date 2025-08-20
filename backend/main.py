@@ -147,7 +147,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
-DEFAULT_OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+DEFAULT_OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-5-nano")
 
 # Pending Telegram link state per chat: { chat_id: {"email": str, "ts": datetime.utcnow()} }
 _PENDING_LINKS: dict[str, dict] = {}

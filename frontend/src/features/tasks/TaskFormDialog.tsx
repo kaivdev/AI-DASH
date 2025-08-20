@@ -123,8 +123,8 @@ export function TaskFormDialog({
         onClick={onClose} 
       />
       
-      <div className="absolute inset-0 flex items-center justify-center p-6">
-        <div className={`w-full max-w-lg bg-background rounded-lg border shadow-xl transition-all duration-200 ${
+      <div className="absolute inset-0 flex items-center justify-center p-6 pointer-events-none">
+        <div className={`w-full max-w-lg bg-background rounded-lg border shadow-xl transition-all duration-200 pointer-events-auto ${
           open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
         }`}>
           

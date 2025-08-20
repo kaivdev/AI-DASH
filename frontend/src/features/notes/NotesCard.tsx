@@ -59,10 +59,10 @@ export function NotesCard() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           )}
           {notes.map((n) => (
-            <div key={n.id} className="rounded border p-3 cursor-pointer" onClick={() => openEdit(n)}>
+            <div key={n.id} className="rounded border p-3 cursor-pointer overflow-hidden" onClick={() => openEdit(n)}>
               <div className="text-xs text-muted-foreground">{n.date}</div>
-              {n.title && <div className="font-medium">{n.title}</div>}
-              <div className="text-sm line-clamp-3 whitespace-pre-wrap">{n.content}</div>
+              {n.title && <div className="font-medium break-all overflow-hidden">{n.title}</div>}
+              <div className="text-sm line-clamp-3 break-all overflow-hidden" style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }}>{n.content}</div>
               <div className="mt-2 flex items-center justify-between gap-2" onClick={(e)=> e.stopPropagation()}>
                 <div className="text-xs text-muted-foreground">
                   {n.shared ? 'Поделено со всеми' : 'Личная заметка'}

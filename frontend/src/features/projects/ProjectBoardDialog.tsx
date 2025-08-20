@@ -140,8 +140,8 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
   const node = (
     <div className="fixed inset-0 z-50">
       <div className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`} onClick={onClose} />
-      <div className="absolute inset-0 flex items-center justify-center p-6">
-        <div className={`w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 flex flex-col ${open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+      <div className="absolute inset-0 flex items-center justify-center p-6 pointer-events-none">
+        <div className={`w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-lg border bg-background shadow-xl transition-all duration-200 flex flex-col pointer-events-auto ${open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
           <div className="p-5 border-b flex items-center justify-between gap-3">
             <h3 className="text-base font-semibold">Проекты</h3>
             <div className="flex items-center gap-2">
