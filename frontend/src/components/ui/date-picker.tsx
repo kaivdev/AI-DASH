@@ -17,15 +17,21 @@ function toDayjs(value?: Date): Dayjs | undefined {
 
 export function DatePicker({ date, onDateChange, placeholder, className, disabled }: Props) {
   const base = 'h-9 px-3 rounded border bg-background text-sm w-full'
+  
   return (
     <AntdDatePicker
       value={toDayjs(date)}
+      defaultPickerValue={toDayjs(date) || dayjs()}
       format="DD.MM.YYYY"
       placeholder={placeholder}
       className={className ? `${base} ${className}` : base}
       disabled={disabled}
       allowClear
-      onChange={(d) => onDateChange?.(d ? d.toDate() : undefined)}
+      preserveInvalidOnBlur={false}
+      onChange={(d) => {
+        // Вызываем callback только при реальном выборе даты
+        onDateChange?.(d ? d.toDate() : undefined)
+      }}
     />
   )
 }

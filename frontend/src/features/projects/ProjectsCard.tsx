@@ -252,7 +252,10 @@ export function ProjectsCard() {
                   <DatePicker 
                     date={startDate ? new Date(startDate) : undefined} 
                     onDateChange={(newDate) => {
-                      if (!newDate) { setStartDate(''); return }
+                      if (newDate === undefined) { 
+                        setStartDate(''); 
+                        return 
+                      }
                       const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
                       setStartDate(t.toISOString().slice(0, 10))
                     }} 
@@ -265,7 +268,10 @@ export function ProjectsCard() {
                   <DatePicker 
                     date={endDate ? new Date(endDate) : undefined} 
                     onDateChange={(newDate) => {
-                      if (!newDate) { setEndDate(''); return }
+                      if (newDate === undefined) { 
+                        setEndDate(''); 
+                        return 
+                      }
                       const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
                       setEndDate(t.toISOString().slice(0, 10))
                     }} 
@@ -372,7 +378,7 @@ export function ProjectsCard() {
                     <div className="w-[160px]"><DatePicker 
                       date={editStart ? new Date(editStart) : undefined} 
                       onDateChange={(newDate) => {
-                        if (!newDate) { setEditStart(''); return }
+                        if (newDate === undefined) { setEditStart(''); return }
                         const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
                         setEditStart(t.toISOString().slice(0, 10))
                       }} 
@@ -383,7 +389,7 @@ export function ProjectsCard() {
                     <div className="w-[160px]"><DatePicker 
                       date={editEnd ? new Date(editEnd) : undefined} 
                       onDateChange={(newDate) => {
-                        if (!newDate) { setEditEnd(''); return }
+                        if (newDate === undefined) { setEditEnd(''); return }
                         const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
                         setEditEnd(t.toISOString().slice(0, 10))
                       }} 
