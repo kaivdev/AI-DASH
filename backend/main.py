@@ -279,7 +279,15 @@ def list_invites(authorization: Optional[str] = Header(None), db: Session = Depe
     user = crud.get_user_by_token(db, token)
     if not user or user.role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    rows = db.query(models.RegistrationCode).order_by(models.RegistrationCode.created_at.desc()).all()
+    
+    # Получить всех пользователей из той же организации
+    org_users = db.execute(_text("SELECT id FROM users WHERE organization_id = :org_id"), {"org_id": user.organization_id}).fetchall()
+    org_user_ids = [row[0] for row in org_users]
+    
+    # Фильтровать коды по создателям из той же организации
+    rows = db.query(models.RegistrationCode).filter(
+        models.RegistrationCode.created_by_user_id.in_(org_user_ids)
+    ).order_by(models.RegistrationCode.created_at.desc()).all()
     return [{"id": r.id, "code": r.code, "is_active": bool(r.is_active), "created_at": r.created_at} for r in rows]
 
 @app.post("/api/invites", response_model=schemas.InviteCodeOut)
@@ -320,7 +328,16 @@ def deactivate_invite(invite_id: int, authorization: Optional[str] = Header(None
     user = crud.get_user_by_token(db, token)
     if not user or user.role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    rc = db.query(models.RegistrationCode).filter(models.RegistrationCode.id == invite_id).first()
+    
+    # Получить всех пользователей из той же организации
+    org_users = db.execute(_text("SELECT id FROM users WHERE organization_id = :org_id"), {"org_id": user.organization_id}).fetchall()
+    org_user_ids = [row[0] for row in org_users]
+    
+    # Найти код и проверить, что он принадлежит организации пользователя
+    rc = db.query(models.RegistrationCode).filter(
+        models.RegistrationCode.id == invite_id,
+        models.RegistrationCode.created_by_user_id.in_(org_user_ids)
+    ).first()
     if not rc:
         raise HTTPException(status_code=404, detail="Not found")
     rc.is_active = False
@@ -1407,7 +1424,7 @@ def _llm_call_for_user(db: Optional[Session], prompt: str, auth_header: Optional
                     print(f"[llm] openrouter error {r.status_code}: {r.text[:200]}")
                 except Exception:
                     print(f"[llm] openrouter error {r.status_code}")
-        except Exception:
+        except Exception as e:
             print(f"[llm] openrouter exception: {e}")
         print("[llm] fallback: ollama")
     else:

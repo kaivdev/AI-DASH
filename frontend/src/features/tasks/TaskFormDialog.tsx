@@ -181,7 +181,11 @@ export function TaskFormDialog({
                 </label>
                 <DatePicker 
                   date={dueDate ? new Date(dueDate) : undefined}
-                  onDateChange={(date) => setDueDate(date ? date.toISOString().slice(0, 10) : '')}
+                  onDateChange={(date) => {
+                    if (!date) { setDueDate(''); return }
+                    const t = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+                    setDueDate(t.toISOString().slice(0, 10))
+                  }}
                   placeholder="Выберите дату"
                 />
               </div>

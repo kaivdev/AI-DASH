@@ -153,7 +153,11 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
                 <div className="md:col-span-1 md:row-start-1 md:col-start-5">
                   <DatePicker 
                     date={newDue ? new Date(newDue) : undefined} 
-                    onDateChange={(newDate) => setNewDue(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    onDateChange={(newDate) => {
+                      if (!newDate) { setNewDue(''); return }
+                      const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                      setNewDue(t.toISOString().slice(0, 10))
+                    }} 
                     placeholder="Срок"
                   />
                 </div>

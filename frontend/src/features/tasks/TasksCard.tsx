@@ -375,7 +375,11 @@ export function TasksCard() {
                   <label className="text-xs mb-1 block">Срок</label>
                   <DatePicker 
                     date={due ? new Date(due) : undefined} 
-                    onDateChange={(newDate) => setDue(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    onDateChange={(newDate) => {
+                      if (!newDate) { setDue(''); return }
+                      const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                      setDue(t.toISOString().slice(0, 10))
+                    }} 
                     className="h-8 w-full" 
                     placeholder="Срок"
                     disabled={!isAdmin}

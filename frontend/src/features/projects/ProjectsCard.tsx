@@ -251,7 +251,11 @@ export function ProjectsCard() {
                   <label className="text-xs mb-1 block">Начало</label>
                   <DatePicker 
                     date={startDate ? new Date(startDate) : undefined} 
-                    onDateChange={(newDate) => setStartDate(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    onDateChange={(newDate) => {
+                      if (!newDate) { setStartDate(''); return }
+                      const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                      setStartDate(t.toISOString().slice(0, 10))
+                    }} 
                     className="h-8 w-full" 
                     placeholder="Начало"
                   />
@@ -260,7 +264,11 @@ export function ProjectsCard() {
                   <label className="text-xs mb-1 block">Окончание</label>
                   <DatePicker 
                     date={endDate ? new Date(endDate) : undefined} 
-                    onDateChange={(newDate) => setEndDate(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                    onDateChange={(newDate) => {
+                      if (!newDate) { setEndDate(''); return }
+                      const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                      setEndDate(t.toISOString().slice(0, 10))
+                    }} 
                     className="h-8 w-full" 
                     placeholder="Окончание"
                   />
@@ -363,14 +371,22 @@ export function ProjectsCard() {
                     <span className="ml-2 text-muted-foreground">Начало</span>
                     <div className="w-[160px]"><DatePicker 
                       date={editStart ? new Date(editStart) : undefined} 
-                      onDateChange={(newDate) => setEditStart(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      onDateChange={(newDate) => {
+                        if (!newDate) { setEditStart(''); return }
+                        const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                        setEditStart(t.toISOString().slice(0, 10))
+                      }} 
                       placeholder="Начало"
                       className="w-full"
                     /></div>
                     <span className="ml-2 text-muted-foreground">Окончание</span>
                     <div className="w-[160px]"><DatePicker 
                       date={editEnd ? new Date(editEnd) : undefined} 
-                      onDateChange={(newDate) => setEditEnd(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      onDateChange={(newDate) => {
+                        if (!newDate) { setEditEnd(''); return }
+                        const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                        setEditEnd(t.toISOString().slice(0, 10))
+                      }} 
                       placeholder="Окончание"
                       className="w-full"
                     /></div>

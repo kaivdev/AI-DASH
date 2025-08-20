@@ -49,11 +49,11 @@ interface KanbanColumn {
 
 // Конфигурация колонок Kanban board
 const kanbanColumns: KanbanColumn[] = [
-  { id: 'open', title: 'Открытые', color: 'bg-slate-100 dark:bg-slate-800' },
-  { id: 'in_progress', title: 'В работе', color: 'bg-blue-100 dark:bg-blue-900/30' },
-  { id: 'paused', title: 'На паузе', color: 'bg-yellow-100 dark:bg-yellow-900/30' },
-  { id: 'awaiting_approval', title: 'Ожидают подтверждения', color: 'bg-orange-100 dark:bg-orange-900/30' },
-  { id: 'completed', title: 'Выполненные', color: 'bg-green-100 dark:bg-green-900/30' }
+  { id: 'open', title: 'Открытые', color: 'bg-slate-100 dark:bg-slate-700' },
+  { id: 'in_progress', title: 'В работе', color: 'bg-blue-100 dark:bg-blue-800' },
+  { id: 'paused', title: 'На паузе', color: 'bg-yellow-100 dark:bg-yellow-800' },
+  { id: 'awaiting_approval', title: 'Ожидают подтверждения', color: 'bg-orange-100 dark:bg-orange-800' },
+  { id: 'completed', title: 'Выполненные', color: 'bg-green-100 dark:bg-green-800' }
 ]
 
 /**
@@ -503,7 +503,7 @@ export function KanbanPage() {
   return (
     <div className="h-full flex flex-col">
       {/* Заголовок страницы */}
-  <div className="flex items-center justify-between px-3 py-1 border-b bg-background">
+  <div className="flex items-center justify-between px-3 py-1 bg-background">
         <div className="flex items-center gap-2">
           <Link 
             to="/" 

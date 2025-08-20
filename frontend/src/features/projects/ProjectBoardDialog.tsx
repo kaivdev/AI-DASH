@@ -163,12 +163,20 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                 <input className="h-9 px-3 rounded border bg-background text-sm md:col-span-3" placeholder="Теги (через запятую)" value={tagInput} onChange={(e) => setTagInput(e.target.value)} />
                 <div className="md:col-span-2"><DatePicker 
                   date={newStart ? new Date(newStart) : undefined} 
-                  onDateChange={(newDate) => setNewStart(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                  onDateChange={(newDate) => {
+                    if (!newDate) { setNewStart(''); return }
+                    const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                    setNewStart(t.toISOString().slice(0, 10))
+                  }} 
                   placeholder="Дата начала"
                 /></div>
                 <div className="md:col-span-2"><DatePicker 
                   date={newEnd ? new Date(newEnd) : undefined} 
-                  onDateChange={(newDate) => setNewEnd(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                  onDateChange={(newDate) => {
+                    if (!newDate) { setNewEnd(''); return }
+                    const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                    setNewEnd(t.toISOString().slice(0, 10))
+                  }} 
                   placeholder="Дата окончания"
                 /></div>
                 <div className="md:col-span-2 flex justify-end">
@@ -192,7 +200,11 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                     <span className="text-xs text-muted-foreground">С</span>
                     <DatePicker 
                       date={startFrom ? new Date(startFrom) : undefined} 
-                      onDateChange={(newDate) => setStartFrom(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      onDateChange={(newDate) => {
+                        if (!newDate) { setStartFrom(''); return }
+                        const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                        setStartFrom(t.toISOString().slice(0, 10))
+                      }} 
                       placeholder="От"
                     />
                   </div>
@@ -200,7 +212,11 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                     <span className="text-xs text-muted-foreground">По</span>
                     <DatePicker 
                       date={startTo ? new Date(startTo) : undefined} 
-                      onDateChange={(newDate) => setStartTo(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                      onDateChange={(newDate) => {
+                        if (!newDate) { setStartTo(''); return }
+                        const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                        setStartTo(t.toISOString().slice(0, 10))
+                      }} 
                       placeholder="До"
                     />
                   </div>

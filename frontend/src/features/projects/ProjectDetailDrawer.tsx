@@ -363,7 +363,11 @@ interface ProjectDetailDrawerProps {
               <label className="text-xs mb-1 block">Начало</label>
               <DatePicker 
                 date={start ? new Date(start) : undefined} 
-                onDateChange={(newDate) => setStart(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                onDateChange={(newDate) => {
+                  if (!newDate) { setStart(''); return }
+                  const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                  setStart(t.toISOString().slice(0, 10))
+                }} 
                 placeholder="Дата начала"
               />
             </div>
@@ -371,7 +375,11 @@ interface ProjectDetailDrawerProps {
               <label className="text-xs mb-1 block">Окончание</label>
               <DatePicker 
                 date={end ? new Date(end) : undefined} 
-                onDateChange={(newDate) => setEnd(newDate ? newDate.toISOString().slice(0, 10) : '')} 
+                onDateChange={(newDate) => {
+                  if (!newDate) { setEnd(''); return }
+                  const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
+                  setEnd(t.toISOString().slice(0, 10))
+                }} 
                 placeholder="Дата окончания"
               />
             </div>
