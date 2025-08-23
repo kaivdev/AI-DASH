@@ -12,6 +12,25 @@ export interface EmployeeStats {
   profitMargin: number
 }
 
+export interface EmployeeStatsAPI {
+  total_hours: number
+  total_revenue: number
+  total_salary_cost: number
+  active_projects_count: number
+  completed_tasks: number
+  in_progress_tasks: number
+  actual_hourly_rate: number
+  revenue_per_hour: number
+  profit_margin: number
+  period_label: string
+}
+
+export interface DateFilter {
+  date_from?: string
+  date_to?: string
+  period_type?: 'month' | 'quarter' | 'custom'
+}
+
 export function calculateEmployeeStats(
   employee: Employee,
   projects: Project[],

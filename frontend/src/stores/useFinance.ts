@@ -54,19 +54,38 @@ export const useFinance = create<FinanceState>()(
           const updated = await transactionApi.update(id, patch) as Transaction
           set((s) => ({ txs: s.txs.map(t => t.id === id ? updated : t), loading: false }))
         } catch (e: any) {
-          // Fallback for backend quirk: some deployments reject date in update (422 none_required)
           const msg = (e && (e as Error).message) || ''
-          const hasDateIssue = msg.includes('"body","date"') && msg.includes('none_required')
-          if (hasDateIssue && (patch as any)?.date !== undefined) {
+          const is422 = /HTTP\s+422/i.test(msg) || /Unprocessable\s+Entity/i.test(msg)
+          const hasDateField = (patch as any)?.date !== undefined
+
+          if (is422 && hasDateField) {
+            const { date: patchDate, ...rest } = (patch as any)
+            const hasRest = Object.keys(rest).length > 0
+            // Strategy A: date -> rest (using dedicated endpoint)
             try {
-              const { date: _omit, ...rest } = (patch as any)
-              const updated = await transactionApi.update(id, rest) as Transaction
-              set((s) => ({ txs: s.txs.map(t => t.id === id ? updated : t), loading: false }))
+              const updatedWithDate = await transactionApi.updateDate(id, String(patchDate)) as Transaction
+              let finalTx = updatedWithDate
+              if (hasRest) {
+                finalTx = await transactionApi.update(id, rest) as Transaction
+              }
+              set((s) => ({ txs: s.txs.map(t => t.id === id ? finalTx : t), loading: false }))
               return
-            } catch (e2) {
-              console.error('Retry update without date failed', e2)
+            } catch (eA) {
+              // Strategy B: rest -> date
+              try {
+                let midTx: Transaction | null = null
+                if (hasRest) {
+                  midTx = await transactionApi.update(id, rest) as Transaction
+                }
+                const finalTx = await transactionApi.updateDate(id, String(patchDate)) as Transaction
+                set((s) => ({ txs: s.txs.map(t => t.id === id ? finalTx : t), loading: false }))
+                return
+              } catch (eB) {
+                console.error('Update retry (date/rest strategies) failed', eA, eB)
+              }
             }
           }
+
           console.error('Failed to update transaction', e)
           set((s) => ({ txs: s.txs.map(t => t.id === id ? ({ ...t, ...(patch as any) }) : t), loading: false, error: 'Updated locally (API unavailable)' }))
         }

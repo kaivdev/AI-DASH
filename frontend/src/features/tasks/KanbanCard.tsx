@@ -2,6 +2,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Task, Priority } from '@/types/core'
 import { Pencil, Clock, Calendar, User, FolderOpen, Pause, Play } from 'lucide-react'
+import { formatDate } from '@/lib/format'
 
 interface KanbanCardProps {
   task: Task
@@ -120,7 +121,7 @@ export function KanbanCard({
             'text-muted-foreground'
           }`}>
             <Calendar className="h-3 w-3" />
-            {task.due_date}
+            {formatDate(task.due_date)}
             {isOverdue && ' (просрочено)'}
             {isDueToday && ' (сегодня)'}
           </div>

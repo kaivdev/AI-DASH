@@ -6,6 +6,7 @@ import { Select } from '@/components/Select'
 import type { TaskWorkStatus } from '@/types/core'
 import { useTasks } from '@/stores/useTasks'
 import { useAuth } from '@/stores/useAuth'
+import { formatDateTime } from '@/lib/format'
 
 interface TaskDetailDialogProps {
   open: boolean
@@ -19,9 +20,10 @@ interface TaskDetailDialogProps {
   onEdit: (task: any) => void
   onToggle: (id: string) => void
   onDelete: (id: string) => void
+  startInEditMode?: boolean
 }
 
-export function TaskDetailDialog({ open, task, employeeName, projectName, employees, projects, inline = false, onClose, onEdit, onToggle, onDelete }: TaskDetailDialogProps) {
+export function TaskDetailDialog({ open, task, employeeName, projectName, employees, projects, inline = false, onClose, onEdit, onToggle, onDelete, startInEditMode = false }: TaskDetailDialogProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [content, setContent] = useState('')
   const [priority, setPriority] = useState('M')
@@ -50,8 +52,9 @@ export function TaskDetailDialog({ open, task, employeeName, projectName, employ
       setCostOverride(typeof (task as any).cost_rate_override === 'number' ? String((task as any).cost_rate_override) : '')
       setBillOverride(typeof (task as any).bill_rate_override === 'number' ? String((task as any).bill_rate_override) : '')
       setWorkStatus((task as any).work_status || '')
+      setIsEditing(startInEditMode)
     }
-  }, [task])
+  }, [task, startInEditMode])
 
   if (!open || !task) return null
 
@@ -125,16 +128,16 @@ export function TaskDetailDialog({ open, task, employeeName, projectName, employ
                  <div className="text-xs text-muted-foreground">Ставка примененная</div>
                  <div>{typeof task.applied_hourly_rate === 'number' ? `${task.applied_hourly_rate} ₽/ч` : '—'}</div>
                </div>
-               <div>
-                 <div className="text-xs text-muted-foreground">Создано</div>
-                 <div>{task.created_at || '—'}</div>
-               </div>
-               {task.updated_at && (
-                 <div>
-                   <div className="text-xs text-muted-foreground">Обновлено</div>
-                   <div>{task.updated_at}</div>
-                 </div>
-               )}
+                             <div>
+                <div className="text-xs text-muted-foreground">Создано</div>
+                <div>{formatDateTime(task.created_at)}</div>
+              </div>
+              {task.updated_at && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Обновлено</div>
+                  <div>{formatDateTime(task.updated_at)}</div>
+                </div>
+              )}
              </div>
             <div className="flex items-center gap-2 pt-2 border-t">
               <button className="h-8 px-3 rounded border inline-flex items-center justify-center" onClick={() => setIsEditing(true)} title="Редактировать" aria-label="Редактировать">

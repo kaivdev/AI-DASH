@@ -6,6 +6,8 @@ import { EmployeeBoardDialog } from './EmployeeBoardDialog'
 import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
 import { EmployeeDetailDrawer } from './EmployeeDetailDrawer'
 import { useAuth } from '@/stores/useAuth'
+import { TagCombobox } from '@/components/ui/tag-combobox'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -69,7 +71,7 @@ export function EmployeesCard() {
       email: email.trim() || undefined,
       salary: salary ? Number(salary) : undefined,
       revenue: revenue ? Number(revenue) : undefined,
-      cost_hourly_rate: costHourly ? Number(costHourly) : undefined,
+      cost_hourly_rate: costHourly ? Number(costHourly) : 0,
       bill_hourly_rate: billHourly ? Number(billHourly) : undefined,
   planned_monthly_hours: plannedHours ? Number(plannedHours) : undefined,
       current_status: 'Новый сотрудник',
@@ -113,7 +115,21 @@ export function EmployeesCard() {
         isAdmin && (
           <button
             className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => {
+              const next = !showAddForm
+              setShowAddForm(next)
+              if (next) {
+                setTimeout(() => {
+                  try {
+                    const card = document.querySelector('[data-module-id="employees"]') as HTMLElement | null
+                    const vp = card?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+                    if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' })
+                    const input = card?.querySelector('input[placeholder="Иван Иванов"]') as HTMLInputElement | null
+                    if (input) input.focus()
+                  } catch {}
+                }, 0)
+              }
+            }}
           >
             {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
           </button>
@@ -157,11 +173,12 @@ export function EmployeesCard() {
               </div>
               <div>
                 <label className="text-xs mb-1 block">Должность *</label>
-                <input 
-                  value={position} 
-                  onChange={(e) => setPosition(e.target.value)}
-                  className="h-8 px-3 rounded border bg-background w-full text-sm"
-                  placeholder="Developer"
+                <TagCombobox
+                  value={position ? [position] : []}
+                  onChange={(values) => setPosition(values[0] || '')}
+                  tagType="position"
+                  placeholder="Выберите должность..."
+                  className="min-h-[32px]"
                 />
               </div>
               <div>
@@ -234,6 +251,19 @@ export function EmployeesCard() {
 
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="space-y-2">
+            {orderedEmployees.length === 0 && (
+              <EmptyState
+                title="Нет данных"
+                description="Добавьте своего первого сотрудника, чтобы начать управление командой и проектами"
+                actions={[
+                  {
+                    label: '+ Добавить сотрудника',
+                    onClick: () => setShowAddForm(true),
+                    variant: 'default'
+                  }
+                ]}
+              />
+            )}
             {orderedEmployees.map((emp) => (
               <div key={emp.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">

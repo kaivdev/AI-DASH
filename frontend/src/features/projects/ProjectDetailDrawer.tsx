@@ -8,6 +8,8 @@ import { useTasks } from '@/stores/useTasks'
 import { useFinance } from '@/stores/useFinance'
 import { ConfirmDialog } from '@/app/ConfirmDialog'
 import { useProjects } from '@/stores/useProjects'
+import { TagCombobox } from '@/components/ui/tag-combobox'
+import { formatDate } from '@/lib/format'
 
 interface ProjectDetailDrawerProps {
   open: boolean
@@ -21,13 +23,14 @@ interface ProjectDetailDrawerProps {
   onAddLink: (projectId: string, link: Omit<ProjectLink, 'id' | 'project_id' | 'created_at'>) => void | Promise<void>
   onRemoveLink: (projectId: string, linkId: string) => void | Promise<void>
   isAdmin?: boolean
+  startInEditMode?: boolean
 }
 
-  export function ProjectDetailDrawer({ open, project, employees, onClose, onEdit, onRemove, onAddMember, onRemoveMember, onAddLink, onRemoveLink, isAdmin }: ProjectDetailDrawerProps) {
+  export function ProjectDetailDrawer({ open, project, employees, onClose, onEdit, onRemove, onAddMember, onRemoveMember, onAddLink, onRemoveLink, isAdmin, startInEditMode }: ProjectDetailDrawerProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [tagsInput, setTagsInput] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [status, setStatus] = useState<Project['status']>('active')
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
@@ -47,7 +50,7 @@ interface ProjectDetailDrawerProps {
     if (project) {
       setName(project.name)
       setDescription(project.description || '')
-      setTagsInput((project.tags || []).join(', '))
+      setTags(project.tags || [])
       setStatus(project.status)
       setStart(project.start_date || '')
       setEnd(project.end_date || '')
@@ -55,10 +58,10 @@ interface ProjectDetailDrawerProps {
       setLinkTitle('')
       setLinkUrl('')
       setLinkType('repo')
-      setIsEditing(false)
+      setIsEditing(startInEditMode || false)
       fetchFinance().catch(()=>{})
     }
-  }, [project, fetchFinance])
+  }, [project, startInEditMode, fetchFinance])
 
   const availableToAdd = useMemo(() => {
     const existing = (project?.member_ids ?? []) as string[]
@@ -72,7 +75,7 @@ interface ProjectDetailDrawerProps {
     const patch = {
       name: name.trim() || undefined,
       description: description ?? undefined,
-      tags: (tagsInput || '').split(',').map(t => t.trim()).filter(Boolean),
+      tags: tags,
       status,
       start_date: start || undefined,
       end_date: end || undefined,
@@ -116,11 +119,11 @@ interface ProjectDetailDrawerProps {
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <div className="text-xs text-muted-foreground">Начало</div>
-              <div>{p.start_date || '—'}</div>
+              <div>{p.start_date ? formatDate(p.start_date) : '—'}</div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Окончание</div>
-              <div>{p.end_date || '—'}</div>
+              <div>{p.end_date ? formatDate(p.end_date) : '—'}</div>
             </div>
             <div className="col-span-2">
               <div className="text-xs text-muted-foreground">Теги</div>
@@ -355,7 +358,13 @@ interface ProjectDetailDrawerProps {
             </div>
             <div>
               <label className="text-xs mb-1 block">Теги (через запятую)</label>
-              <input className="h-9 px-3 rounded border bg-background w-full text-sm" value={tagsInput} onChange={(e)=>setTagsInput(e.target.value)} />
+              <TagCombobox
+                value={tags}
+                onChange={setTags}
+                tagType="project_tag"
+                placeholder="Добавьте теги..."
+                className="min-h-[36px]"
+              />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -386,7 +395,7 @@ interface ProjectDetailDrawerProps {
           </div>
           <div className="flex items-center gap-2 pt-2 border-t">
             <button className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2" onClick={onSave}><Save className="h-4 w-4" /> Сохранить</button>
-            <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={() => { setIsEditing(false); setName(p.name); setDescription(p.description); setTagsInput(p.tags.join(', ')); setStatus(p.status); setStart(p.start_date || ''); setEnd(p.end_date || ''); }}><CloseIcon className="h-4 w-4" /> Отмена</button>
+            <button className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2" onClick={() => { setIsEditing(false); setName(p.name); setDescription(p.description); setTags(p.tags || []); setStatus(p.status); setStart(p.start_date || ''); setEnd(p.end_date || ''); }}><CloseIcon className="h-4 w-4" /> Отмена</button>
           </div>
         </div>
       )}

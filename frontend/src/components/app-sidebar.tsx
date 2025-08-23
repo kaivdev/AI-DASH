@@ -16,6 +16,7 @@ import {
   ChevronUp,
   LayoutGrid,
   ChevronDown,
+  MessageCircle,
 } from 'lucide-react'
 
 import {
@@ -63,6 +64,11 @@ const navigation = [
     title: 'Дашборд',
     url: '/',
     icon: Home,
+  },
+  {
+    title: 'Чат с ИИ',
+    url: '/chat',
+    icon: MessageCircle,
   },
   {
     title: 'Kanban Board',

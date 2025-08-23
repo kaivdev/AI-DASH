@@ -1,7 +1,9 @@
 import React from 'react'
-import { DatePicker as AntdDatePicker } from 'antd'
-import dayjs, { Dayjs } from 'dayjs'
-import { ConfigProvider } from 'antd'
+import dayjs from 'dayjs'
+import { ChevronDownIcon } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 interface Props {
   date?: Date
@@ -11,38 +13,40 @@ interface Props {
   disabled?: boolean
 }
 
-function toDayjs(value?: Date): Dayjs | undefined {
-  if (!value) return undefined
-  return dayjs(value)
-}
-
 export function DatePicker({ date, onDateChange, placeholder, className, disabled }: Props) {
-  const base = 'h-9 px-3 rounded border bg-background text-sm w-full'
-  
+  const [open, setOpen] = React.useState(false)
+  const label = date ? dayjs(date).format('DD.MM.YYYY') : (placeholder ?? 'Select date')
 
-
-return (
-  <ConfigProvider
-    theme={{
-      token: {
-        colorPrimary: "var(--primary)"
-      }
-    }}
-  >
-    <AntdDatePicker
-      value={toDayjs(date)}
-      defaultPickerValue={toDayjs(date) || dayjs()}
-      format="DD.MM.YYYY"
-      placeholder={placeholder}
-      className={className ? `${base} ${className}` : base}
-      disabled={disabled}
-      allowClear
-      preserveInvalidOnBlur={false}
-      onChange={(d) => {
-        // Вызываем callback только при реальном выборе даты
-        onDateChange?.(d ? d.toDate() : undefined)
-      }}
-    />
-  </ConfigProvider>
-)
+  return (
+    <Popover open={open} onOpenChange={setOpen} modal>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          className={className ? `${className} justify-between font-normal` : 'w-full justify-between font-normal'}
+          disabled={disabled}
+        >
+          {label}
+          <ChevronDownIcon className="ml-2 size-4 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-auto overflow-hidden p-0"
+        align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        onFocusOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <Calendar
+          mode="single"
+          selected={date}
+          captionLayout="dropdown"
+          onSelect={(d) => {
+            onDateChange?.(d)
+            setOpen(false)
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  )
 }

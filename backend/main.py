@@ -144,10 +144,37 @@ AVATAR_DIR = os.path.join(UPLOAD_DIR, "avatars")
 os.makedirs(AVATAR_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 DEFAULT_OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-5-nano")
+
+# Centralized OpenRouter-only LLM call (used across endpoints)
+def _llm_only_openrouter(prompt: str, key: str) -> str:
+    r = requests.post(
+        f"{OPENROUTER_BASE}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "AI Life Dashboard",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": DEFAULT_OPENROUTER_MODEL,
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+            ],
+        },
+        timeout=120,
+    )
+    if r.ok:
+        j = r.json()
+        if isinstance(j, dict) and j.get("choices"):
+            return j["choices"][0]["message"]["content"]
+    try:
+        detail = r.text[:200]
+    except Exception:
+        detail = ""
+    raise HTTPException(status_code=502, detail=f"OpenRouter error {r.status_code}: {detail}")
 
 # Pending Telegram link state per chat: { chat_id: {"email": str, "ts": datetime.utcnow()} }
 _PENDING_LINKS: dict[str, dict] = {}
@@ -439,114 +466,194 @@ def get_employees(db: Session = Depends(get_db), authorization: Optional[str] = 
     # Без авторизации: пусто
     return []
 
+# Create employee (owner/admin)
+@app.post("/api/employees", response_model=schemas.Employee)
+def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    emp = crud.create_employee(db, employee)
+    # присваиваем организацию создателя
+    from sqlalchemy import text as _t
+    db.execute(_t("UPDATE employees SET organization_id = :oid WHERE id = :id"), {"oid": user.organization_id, "id": emp.id})
+    db.commit()
+    return emp
+
+# Update employee (owner/admin)
+@app.put("/api/employees/{employee_id}", response_model=schemas.Employee)
+def update_employee(employee_id: str, employee: schemas.EmployeeUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    emp = crud.update_employee(db, employee_id, employee)
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    # доп. проверка на принадлежность организации
+    if emp.organization_id and emp.organization_id != user.organization_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return emp
+
+# Update employee status (owner/admin)
+@app.put("/api/employees/{employee_id}/status", response_model=schemas.Employee)
+def update_employee_status(employee_id: str, payload: schemas.EmployeeStatusUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    emp = crud.update_employee_status(db, employee_id, payload)
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return emp
+
+# Delete employee (owner/admin)
+@app.delete("/api/employees/{employee_id}", response_model=schemas.MessageResponse)
+def delete_employee(employee_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization.split(" ", 1)[1]
+    user = crud.get_user_by_token(db, token)
+    if not user or user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    ok = crud.delete_employee(db, employee_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return {"message": "Employee deleted successfully"}
+
 @app.get("/api/employees/{employee_id}", response_model=schemas.Employee)
 def get_employee(employee_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = authorization.split(" ", 1)[1]
     user = crud.get_user_by_token(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     employee = crud.get_employee(db, employee_id)
-    if not employee or not user:
+    if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    # Admin/owner: может смотреть сотрудников своей организации
     if user.role in ("owner", "admin"):
         if employee.organization_id != user.organization_id:
             raise HTTPException(status_code=404, detail="Employee not found")
         return employee
-    # Regular user: only own employee card
-    if employee.user_id != user.id:
+    # Обычный пользователь: только себя
+    my_emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+    if not my_emp or my_emp.id != employee.id:
         raise HTTPException(status_code=404, detail="Employee not found")
     return employee
 
-@app.post("/api/employees", response_model=schemas.Employee)
-def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    # Only admin/owner can create employees
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
-            raise HTTPException(status_code=403, detail="Forbidden")
+@app.post("/api/employees/{employee_id}/stats", response_model=schemas.EmployeeStats)
+def get_employee_stats(
+    employee_id: str, 
+    stats_request: schemas.EmployeeStatsRequest,
+    db: Session = Depends(get_db), 
+    authorization: Optional[str] = Header(None)
+):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = authorization.split(" ", 1)[1]
     user = crud.get_user_by_token(db, token)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    emp = crud.create_employee(db, employee)
-    # assign organization
-    from sqlalchemy import text as _t
-    db.execute(_t("UPDATE employees SET organization_id = :oid WHERE id = :id"), {"oid": user.organization_id, "id": emp.id})
-    db.commit()
-    return emp
-
-@app.put("/api/employees/{employee_id}", response_model=schemas.Employee)
-def update_employee(employee_id: str, employee: schemas.EmployeeUpdate, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    # Non-admin users cannot change rate-related fields
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
-            # forbid direct changes to rates, revenue/salary and planned hours
-            forbidden_fields = {"hourly_rate", "cost_hourly_rate", "bill_hourly_rate", "revenue", "salary", "planned_monthly_hours"}
-            payload = employee.model_dump(exclude_unset=True)
-            if any(f in payload for f in forbidden_fields):
-                raise HTTPException(status_code=403, detail="Forbidden: insufficient permissions to modify these fields")
-    # allow auto-recalc only for admins; for regular users, do not recalc rates implicitly
-    allow_recalc = True
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if not user or user.role not in ("owner", "admin"):
-            allow_recalc = False
-    db_employee = crud.update_employee(db, employee_id, employee, allow_recalc=allow_recalc)
-    if not db_employee:
+    
+    employee = crud.get_employee(db, employee_id)
+    if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    return db_employee
-
-@app.put("/api/employees/{employee_id}/status", response_model=schemas.Employee)
-def update_employee_status(employee_id: str, status_update: schemas.EmployeeStatusUpdate, db: Session = Depends(get_db)):
-    db_employee = crud.update_employee_status(db, employee_id, status_update)
-    if not db_employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    return db_employee
-
-@app.delete("/api/employees/{employee_id}", response_model=schemas.MessageResponse)
-def delete_employee(employee_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    # Only admin/owner can delete employees
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if user and user.role not in ("owner", "admin"):
-            raise HTTPException(status_code=403, detail="Forbidden")
-    if crud.delete_employee(db, employee_id):
-        return {"message": "Employee deleted successfully"}
-    raise HTTPException(status_code=404, detail="Employee not found")
-
-# Project endpoints
-@app.get("/api/projects", response_model=List[schemas.Project])
-def get_projects(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        user = crud.get_user_by_token(db, token)
-        if user:
-            if user.role in ("owner", "admin"):
-                # Need to include computed fields like member_ids and member rate maps
-                projects = (
-                    db.query(models.Project)
-                    .filter(models.Project.organization_id == user.organization_id)
-                    .all()
-                )
-                for project in projects:
-                    # Populate computed fields to satisfy response schema
-                    project.member_ids = [m.employee_id for m in project.members]
-                    project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
-                    project.member_cost_rates = {m.employee_id: m.cost_hourly_rate for m in project.members}
-                    project.member_bill_rates = {
-                        m.employee_id: (m.bill_hourly_rate if m.bill_hourly_rate is not None else m.hourly_rate)
-                        for m in project.members
-                    }
-                return projects
-            return crud.list_projects_for_user(db, user)
-    return []
+    
+    # Check permissions
+    if user.role in ("owner", "admin"):
+        if employee.organization_id != user.organization_id:
+            raise HTTPException(status_code=404, detail="Employee not found")
+    else:
+        # Regular user: only their own stats
+        my_emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+        if not my_emp or my_emp.id != employee.id:
+            raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Parse date filters
+    date_from = None
+    date_to = None
+    period_label = "Всё время"
+    
+    if stats_request.date_from:
+        try:
+            date_from = datetime.strptime(stats_request.date_from, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date_from format")
+    
+    if stats_request.date_to:
+        try:
+            date_to = datetime.strptime(stats_request.date_to, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date_to format")
+    
+    # Handle period presets
+    if stats_request.period_type == "month" and date_from and date_to:
+        period_label = f"{date_from.strftime('%B %Y')}"
+    elif stats_request.period_type == "quarter" and date_from and date_to:
+        quarter = (date_from.month - 1) // 3 + 1
+        period_label = f"Q{quarter} {date_from.year}"
+    elif stats_request.period_type == "custom" and date_from and date_to:
+        period_label = f"{date_from.strftime('%d.%m.%Y')} - {date_to.strftime('%d.%m.%Y')}"
+    elif date_from and date_to:
+        period_label = f"{date_from.strftime('%d.%m.%Y')} - {date_to.strftime('%d.%m.%Y')}"
+    
+    # Query tasks with date filtering
+    tasks_query = db.query(models.Task).filter(models.Task.assigned_to == employee_id)
+    if date_from:
+        tasks_query = tasks_query.filter(models.Task.created_at >= date_from)
+    if date_to:
+        tasks_query = tasks_query.filter(models.Task.created_at <= date_to + timedelta(days=1))
+    tasks = tasks_query.all()
+    
+    # Query transactions with date filtering
+    transactions_query = db.query(models.Transaction).filter(models.Transaction.employee_id == employee_id)
+    if date_from:
+        transactions_query = transactions_query.filter(models.Transaction.date >= date_from)
+    if date_to:
+        transactions_query = transactions_query.filter(models.Transaction.date <= date_to)
+    transactions = transactions_query.all()
+    
+    # Query active projects
+    active_projects = db.query(models.Project).join(
+        models.ProjectMember, models.Project.id == models.ProjectMember.project_id
+    ).filter(
+        models.ProjectMember.employee_id == employee_id,
+        models.Project.status == 'active',
+        models.Project.organization_id == employee.organization_id
+    ).all()
+    
+    # Calculate statistics
+    total_hours = sum(task.hours_spent for task in tasks)
+    completed_tasks = sum(1 for task in tasks if task.done)
+    in_progress_tasks = sum(1 for task in tasks if not task.done)
+    
+    total_revenue = sum(tx.amount for tx in transactions if tx.transaction_type == 'income')
+    total_salary_cost = sum(tx.amount for tx in transactions if tx.transaction_type == 'expense')
+    
+    actual_hourly_rate = total_salary_cost / total_hours if total_hours > 0 else 0
+    revenue_per_hour = total_revenue / total_hours if total_hours > 0 else 0
+    profit_margin = ((total_revenue - total_salary_cost) / total_revenue * 100) if total_revenue > 0 else 0
+    
+    return schemas.EmployeeStats(
+        total_hours=total_hours,
+        total_revenue=total_revenue,
+        total_salary_cost=total_salary_cost,
+        active_projects_count=len(active_projects),
+        completed_tasks=completed_tasks,
+        in_progress_tasks=in_progress_tasks,
+        actual_hourly_rate=actual_hourly_rate,
+        revenue_per_hour=revenue_per_hour,
+        profit_margin=profit_margin,
+        period_label=period_label
+    )
 
 @app.get("/api/projects/{project_id}", response_model=schemas.Project)
 def get_project(project_id: str, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
@@ -618,6 +725,36 @@ def delete_project(project_id: str, db: Session = Depends(get_db), authorization
     if crud.delete_project(db, project_id):
         return {"message": "Project deleted successfully"}
     raise HTTPException(status_code=404, detail="Project not found")
+
+@app.get("/api/projects", response_model=List[schemas.Project])
+def get_projects(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    # Возвращает список проектов в пределах организации для owner/admin,
+    # или проекты, где пользователь является участником, для обычных пользователей.
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        user = crud.get_user_by_token(db, token)
+        if user:
+            if user.role in ("owner", "admin"):
+                projects = (
+                    db.query(models.Project)
+                    .filter(models.Project.organization_id == user.organization_id)
+                    .order_by(models.Project.created_at.desc())
+                    .all()
+                )
+                # Заполнить вычисляемые поля, ожидаемые схемой ответа
+                for project in projects:
+                    project.member_ids = [m.employee_id for m in project.members]
+                    project.member_rates = {m.employee_id: m.hourly_rate for m in project.members}
+                    project.member_cost_rates = {m.employee_id: m.cost_hourly_rate for m in project.members}
+                    project.member_bill_rates = {
+                        m.employee_id: (m.bill_hourly_rate if m.bill_hourly_rate is not None else m.hourly_rate)
+                        for m in project.members
+                    }
+                return projects
+            # Обычный пользователь
+            return crud.list_projects_for_user(db, user)
+    # Без авторизации вернём пустой список, как и другие list-эндпойнты
+    return []
 
 @app.post("/api/projects/{project_id}/members", response_model=schemas.MessageResponse)
 def add_project_member(project_id: str, member: schemas.ProjectMemberAdd, db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
@@ -728,6 +865,29 @@ def delete_transaction(transaction_id: str, db: Session = Depends(get_db)):
     if crud.delete_transaction(db, transaction_id):
         return {"message": "Transaction deleted successfully"}
     raise HTTPException(status_code=404, detail="Transaction not found")
+
+# Add lightweight endpoint to update only the date (to handle clients that struggle with mixed payload validation)
+@app.put("/api/transactions/{transaction_id}/date", response_model=schemas.Transaction)
+def update_transaction_date(transaction_id: str, request: dict, db: Session = Depends(get_db)):
+    date_value = request.get("date")
+    if not date_value:
+        raise HTTPException(status_code=400, detail="Missing 'date' field in request body")
+    
+    try:
+        # Accept common ISO format YYYY-MM-DD
+        parsed = datetime.fromisoformat(str(date_value)).date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    
+    # Update transaction directly without schema validation
+    db_transaction = crud.get_transaction(db, transaction_id)
+    if not db_transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    db_transaction.date = parsed
+    db.commit()
+    db.refresh(db_transaction)
+    return db_transaction
 
 # Task endpoints
 @app.get("/api/tasks", response_model=List[schemas.Task])
@@ -1385,7 +1545,7 @@ def _call_ollama(prompt: str) -> str:
     raise HTTPException(status_code=500, detail=f"LLM error: {'; '.join(errors) or 'unknown'}")
 
 def _llm_call_for_user(db: Optional[Session], prompt: str, auth_header: Optional[str]) -> str:
-    """Route to OpenRouter when user profile has a key, else fallback to Ollama."""
+    """Route strictly to OpenRouter; require per-user key."""
     key: Optional[str] = None
     try:
         if db is not None and auth_header and auth_header.startswith("Bearer "):
@@ -1395,41 +1555,9 @@ def _llm_call_for_user(db: Optional[Session], prompt: str, auth_header: Optional
                 key = user.profile.openrouter_api_key
     except Exception:
         key = None
-    if key:
-        try:
-            print(f"[llm] routing: openrouter model={DEFAULT_OPENROUTER_MODEL}")
-            r = requests.post(
-                f"{OPENROUTER_BASE}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "HTTP-Referer": "http://localhost:8000",
-                    "X-Title": "AI Life Dashboard",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": DEFAULT_OPENROUTER_MODEL,
-                    "messages": [
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
-                timeout=120,
-            )
-            if r.ok:
-                j = r.json()
-                if isinstance(j, dict) and j.get("choices"):
-                    return j["choices"][0]["message"]["content"]
-            else:
-                try:
-                    print(f"[llm] openrouter error {r.status_code}: {r.text[:200]}")
-                except Exception:
-                    print(f"[llm] openrouter error {r.status_code}")
-        except Exception as e:
-            print(f"[llm] openrouter exception: {e}")
-        print("[llm] fallback: ollama")
-    else:
-        print("[llm] routing: ollama (no per-user OpenRouter key)")
-    return _call_ollama(prompt)
+    if not key:
+        raise HTTPException(status_code=400, detail="OpenRouter API key not configured in your profile")
+    return _llm_only_openrouter(prompt, key)
 
 def _nlg(facts) -> str:
     """Generate a human-friendly short answer from structured facts using the same LLM backend.
@@ -1446,7 +1574,17 @@ def _nlg(facts) -> str:
             "по приведённым ФАКТАМ. Не выдумывай, не добавляй внешние знания."
         )
         prompt = f"{system}\nФАКТЫ:\n{facts_text}\nОТВЕТ:"
-        out = _call_ollama(prompt)
+        # Reuse OpenRouter for NLG when available; otherwise return facts as plain text
+        try:
+            token = auth_header.split(" ", 1)[1] if auth_header and auth_header.startswith("Bearer ") else None
+            user = crud.get_user_by_token(db, token) if (db and token) else None
+            key = user.profile.openrouter_api_key if (user and user.profile and getattr(user.profile, 'openrouter_api_key', None)) else None
+            if key:
+                out = _llm_only_openrouter(prompt, key)
+            else:
+                out = facts_text
+        except Exception:
+            out = facts_text
         return (out or "").strip()
     except Exception:
         return ""
@@ -1817,7 +1955,7 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db),
             "assignee": assignee_name or None,
             "project": proj_name or None,
         }
-        summary = _nlg(facts) or f"Создана задача ‘{task.content}’ (приоритет {priority}{', срок ' + task.due_date.isoformat() if task.due_date else ''})."
+        summary = _nlg(facts) or f"Создана задача '{task.content}' (приоритет {priority}{', срок ' + task.due_date.isoformat() if task.due_date else ''})."
         return {"result": {"summary": summary, "actions": actions, "created_task_ids": created}}
 
     if intent == "summary":
@@ -1866,21 +2004,21 @@ def ai_command(payload: schemas.AICommandRequest, db: Session = Depends(get_db),
             "priority": target.priority,
             "due_date": target.due_date.isoformat() if target.due_date else None,
         }
-        return {"result": {"summary": _nlg(facts) or f"Обновлена задача ‘{target.content}’", "actions": ["Обновлена задача"], "created_task_ids": []}}
+        return {"result": {"summary": _nlg(facts) or f"Обновлена задача '{target.content}'", "actions": ["Обновлена задача"], "created_task_ids": []}}
 
     if intent == "toggle_task":
         target = crud.find_task_by_text(db, data.get("content") or "")
         if not target:
             return {"result": {"summary": "Задача не найдена", "actions": [], "created_task_ids": []}}
         crud.toggle_task(db, target.id)
-        return {"result": {"summary": f"Переключен статус задачи ‘{target.content}’", "actions": ["Переключен статус"], "created_task_ids": []}}
+        return {"result": {"summary": f"Переключен статус задачи '{target.content}'", "actions": ["Переключен статус"], "created_task_ids": []}}
 
     if intent == "delete_task":
         target = crud.find_task_by_text(db, data.get("content") or "")
         if not target:
             return {"result": {"summary": "Задача не найдена", "actions": [], "created_task_ids": []}}
         crud.delete_task(db, target.id)
-        return {"result": {"summary": f"Удалена задача ‘{target.content}’", "actions": ["Удалена задача"], "created_task_ids": []}}
+        return {"result": {"summary": f"Удалена задача '{target.content}'", "actions": ["Удалена задача"], "created_task_ids": []}}
 
     if intent == "finance":
         # month like YYYY-MM
@@ -2556,6 +2694,47 @@ def clear_messages(session_id: str, authorization: Optional[str] = Header(None),
     if not ok:
         raise HTTPException(status_code=404, detail="Not found")
     return {"message": "Cleared"}
+
+# --- User Tags endpoints ---
+
+@app.get("/api/user-tags", response_model=schemas.UserTagsResponse)
+def get_user_tags(tag_type: Optional[str] = None, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Получить теги пользователя, опционально отфильтрованные по типу"""
+    user = _auth_user(db, authorization)
+    tags = crud.get_user_tags(db, user.id, tag_type)
+    return {"tags": tags}
+
+@app.get("/api/user-tags/suggestions")
+def get_tag_suggestions(tag_type: str, search: str = "", authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Получить предложения тегов для автодополнения"""
+    user = _auth_user(db, authorization)
+    suggestions = crud.get_user_tag_suggestions(db, user.id, tag_type, search)
+    return {"suggestions": suggestions}
+
+@app.post("/api/user-tags", response_model=schemas.UserTag)
+def create_user_tag(tag_data: schemas.UserTagCreate, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Создать новый тег или увеличить счетчик использования существующего"""
+    user = _auth_user(db, authorization)
+    tag = crud.create_or_increment_user_tag(db, user.id, tag_data.tag_value, tag_data.tag_type)
+    return tag
+
+@app.put("/api/user-tags/{tag_id}", response_model=schemas.UserTag)
+def update_user_tag(tag_id: str, tag_update: schemas.UserTagUpdate, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Обновить тег пользователя"""
+    user = _auth_user(db, authorization)
+    tag = crud.update_user_tag(db, user.id, tag_id, tag_update)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return tag
+
+@app.delete("/api/user-tags/{tag_id}", response_model=schemas.MessageResponse)
+def delete_user_tag(tag_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Удалить тег пользователя"""
+    user = _auth_user(db, authorization)
+    success = crud.delete_user_tag(db, user.id, tag_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return {"message": "Tag deleted"}
 
 if __name__ == "__main__":
     import uvicorn

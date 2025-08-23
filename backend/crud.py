@@ -275,16 +275,6 @@ def get_employee(db: Session, employee_id: str) -> Optional[models.Employee]:
 
 def create_employee(db: Session, employee: schemas.EmployeeCreate) -> models.Employee:
     data = employee.model_dump()
-    # Auto-calc cost_hourly_rate from salary if provided and no explicit cost rate
-    sal = data.get("salary")
-    if sal is not None and data.get("cost_hourly_rate") is None:
-        try:
-            # prefer per-employee planned hours if provided
-            ph = data.get("planned_monthly_hours")
-            hours = max(1, int(ph if ph is not None else settings.PLANNED_MONTHLY_HOURS))
-        except Exception:
-            hours = 160
-        data["cost_hourly_rate"] = int(round(float(sal) / float(hours)))
     db_employee = models.Employee(
         id=generate_id(),
         **data
@@ -299,43 +289,6 @@ def update_employee(db: Session, employee_id: str, employee: schemas.EmployeeUpd
     if not db_employee:
         return None
     update_data = employee.model_dump(exclude_unset=True)
-
-    # If salary is updated and cost_hourly_rate not explicitly passed -> recalc
-    if (
-        allow_recalc
-        and "salary" in update_data
-        and "cost_hourly_rate" not in update_data
-        and update_data.get("salary") is not None
-    ):
-        try:
-            # consider updated planned_monthly_hours if provided in same patch, else existing value, else global default
-            if (
-                "planned_monthly_hours" in update_data
-                and update_data.get("planned_monthly_hours") is not None
-            ):
-                hours_source = update_data.get("planned_monthly_hours")
-            else:
-                hours_source = getattr(db_employee, "planned_monthly_hours", None)
-            hours = max(1, int(hours_source if hours_source is not None else settings.PLANNED_MONTHLY_HOURS))
-        except Exception:
-            hours = 160
-        try:
-            update_data["cost_hourly_rate"] = int(round(float(update_data["salary"]) / float(hours)))
-        except Exception:
-            pass
-    # If only planned_monthly_hours changes and salary exists, recalc cost unless explicitly provided
-    elif (
-        allow_recalc
-        and ("planned_monthly_hours" in update_data)
-        and (update_data.get("planned_monthly_hours") is not None)
-        and ("cost_hourly_rate" not in update_data)
-        and (getattr(db_employee, "salary", None) is not None)
-    ):
-        try:
-            hours = max(1, int(update_data.get("planned_monthly_hours")))
-            update_data["cost_hourly_rate"] = int(round(float(db_employee.salary) / float(hours)))
-        except Exception:
-            pass
 
     for field, value in update_data.items():
         setattr(db_employee, field, value)
@@ -928,4 +881,95 @@ def delete_session(db: Session, token: str) -> None:
     sess = db.query(models.Session).filter(models.Session.token == token).first()
     if sess:
         db.delete(sess)
-        db.commit() 
+        db.commit()
+
+# --- User Tags CRUD operations ---
+
+def get_user_tags(db: Session, user_id: str, tag_type: Optional[str] = None) -> List[models.UserTag]:
+    """Получить теги пользователя, опционально отфильтрованные по типу"""
+    query = db.query(models.UserTag).filter(models.UserTag.user_id == user_id)
+    if tag_type:
+        query = query.filter(models.UserTag.tag_type == tag_type)
+    return query.order_by(models.UserTag.usage_count.desc(), models.UserTag.tag_value).all()
+
+def create_or_increment_user_tag(db: Session, user_id: str, tag_value: str, tag_type: str) -> models.UserTag:
+    """Создать новый тег или увеличить счетчик использования существующего"""
+    # Проверяем существует ли тег
+    existing_tag = db.query(models.UserTag).filter(
+        and_(
+            models.UserTag.user_id == user_id,
+            models.UserTag.tag_value == tag_value,
+            models.UserTag.tag_type == tag_type
+        )
+    ).first()
+    
+    if existing_tag:
+        # Увеличиваем счетчик использования
+        existing_tag.usage_count += 1
+        existing_tag.updated_at = func.now()
+        db.commit()
+        db.refresh(existing_tag)
+        return existing_tag
+    else:
+        # Создаем новый тег
+        new_tag = models.UserTag(
+            id=generate_id(),
+            user_id=user_id,
+            tag_value=tag_value,
+            tag_type=tag_type,
+            usage_count=1
+        )
+        db.add(new_tag)
+        db.commit()
+        db.refresh(new_tag)
+        return new_tag
+
+def delete_user_tag(db: Session, user_id: str, tag_id: str) -> bool:
+    """Удалить тег пользователя"""
+    tag = db.query(models.UserTag).filter(
+        and_(
+            models.UserTag.id == tag_id,
+            models.UserTag.user_id == user_id
+        )
+    ).first()
+    
+    if tag:
+        db.delete(tag)
+        db.commit()
+        return True
+    return False
+
+def update_user_tag(db: Session, user_id: str, tag_id: str, tag_update: schemas.UserTagUpdate) -> Optional[models.UserTag]:
+    """Обновить тег пользователя"""
+    tag = db.query(models.UserTag).filter(
+        and_(
+            models.UserTag.id == tag_id,
+            models.UserTag.user_id == user_id
+        )
+    ).first()
+    
+    if not tag:
+        return None
+    
+    update_data = tag_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(tag, field, value)
+    
+    tag.updated_at = func.now()
+    db.commit()
+    db.refresh(tag)
+    return tag
+
+def get_user_tag_suggestions(db: Session, user_id: str, tag_type: str, search_query: str = "") -> List[str]:
+    """Получить предложения тегов для автодополнения"""
+    query = db.query(models.UserTag.tag_value).filter(
+        and_(
+            models.UserTag.user_id == user_id,
+            models.UserTag.tag_type == tag_type
+        )
+    )
+    
+    if search_query:
+        query = query.filter(models.UserTag.tag_value.ilike(f"%{search_query}%"))
+    
+    return [tag.tag_value for tag in query.order_by(models.UserTag.usage_count.desc()).limit(10).all()] 

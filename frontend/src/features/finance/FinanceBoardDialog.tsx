@@ -21,6 +21,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const employees = useEmployees((s) => s.employees)
   const projects = useProjects((s) => s.projects)
   const tasks = useTasks((s) => s.tasks)
+  const formerEmployees = useEmployees((s) => s.formerEmployees)
 
   // quick add form
   const [amount, setAmount] = useState('')
@@ -200,14 +201,20 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     for (const [pid, inner] of map) {
       for (const [eid, hours] of inner) {
         const projectName = pid === '—' ? 'Без проекта' : (projects.find(p=>p.id===pid)?.name || pid)
-        const employeeName = eid === '—' ? 'Не назначен' : (employees.find(e=>e.id===eid)?.name || eid)
+        let employeeName: string
+        if (eid === '—') employeeName = 'Не назначен'
+        else {
+          const found = employees.find(e=>e.id===eid)?.name
+          const archived = formerEmployees?.[eid]
+          employeeName = found || (archived ? `${archived} (уволен)` : eid)
+        }
         rows.push({ projectId: pid, projectName, employeeId: eid, employeeName, hours })
       }
     }
     // sort by project then hours desc
     rows.sort((a,b)=> a.projectName.localeCompare(b.projectName) || b.hours - a.hours)
     return rows
-  }, [tasks, projects, employees, dateFrom, dateTo])
+  }, [tasks, projects, employees, formerEmployees, dateFrom, dateTo])
 
   // stats + per-project summary
   const stats = useMemo(() => {

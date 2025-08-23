@@ -1,5 +1,5 @@
 import React from 'react'
-import {Drawer, Button, Space, Switch} from 'antd'
+import {Drawer} from 'antd'
 import {useMarkdownEditor, MarkdownEditorView} from '@gravity-ui/markdown-editor'
 import MarkdownIt from 'markdown-it'
 // Подсветка синтаксиса в превью
@@ -17,6 +17,8 @@ import javaLang from 'highlight.js/lib/languages/java'
 import xmlLang from 'highlight.js/lib/languages/xml' // html/xml
 import cssLang from 'highlight.js/lib/languages/css'
 import type { Note } from '@/types/core'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 
 type Mode = 'view' | 'edit' | 'create'
 
@@ -144,7 +146,7 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
 
   return (
     <Drawer open={open} onClose={onClose} placement="right" width="50vw" title={header} destroyOnClose>
-  <div className="flex flex-col h-full gap-3">
+      <div className="flex flex-col h-full gap-3">
         <div className="space-y-2">
           <input
             className="w-full h-9 px-3 rounded border bg-background text-foreground placeholder:text-muted-foreground"
@@ -153,12 +155,8 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
             onChange={(e) => setTitle(e.target.value)}
             disabled={false}
           />
-          <div className="flex items-center gap-2 text-sm">
-            <Switch checked={shared} onChange={setShared} disabled={false} />
-            <span>Поделиться со всеми</span>
-          </div>
         </div>
-  <div className="flex-1 min-h-0 border rounded overflow-hidden" dir="ltr">
+        <div className="flex-1 min-h-0 border rounded overflow-hidden" dir="ltr">
           <MarkdownEditorView
             key={`${note?.id || 'new'}-edit-${open ? 'open' : 'closed'}`}
             stickyToolbar
@@ -166,15 +164,19 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
             editor={editor}
           />
         </div>
-        <div className="flex justify-end gap-2">
-          <Space>
-            <Button onClick={onClose}>Закрыть</Button>
+        <div className="flex items-center justify-between gap-2">
+          <label className="flex items-center gap-2 text-sm">
+            <Switch checked={shared} onCheckedChange={setShared} />
+            <span>Поделиться со всеми</span>
+          </label>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Закрыть</Button>
             {isCreate ? (
-              <Button type="primary" onClick={handleSubmit}>Добавить</Button>
+              <Button onClick={handleSubmit}>Добавить</Button>
             ) : (
-              <Button type="primary" onClick={handleSubmit}>Сохранить</Button>
+              <Button onClick={handleSubmit}>Сохранить</Button>
             )}
-          </Space>
+          </div>
         </div>
       </div>
     </Drawer>

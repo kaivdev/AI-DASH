@@ -6,6 +6,7 @@ import { useProjects } from '@/stores/useProjects'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { X, Plus } from 'lucide-react'
+import { TagCombobox } from '@/components/ui/tag-combobox'
 
 export function QuickAddTransactionDialog({ open, onClose, presetType }: { open: boolean; onClose: () => void; presetType: 'income' | 'expense' | null }) {
   const add = useFinance((s) => s.add)
@@ -17,7 +18,7 @@ export function QuickAddTransactionDialog({ open, onClose, presetType }: { open:
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [category, setCategory] = useState('')
-  const [tags, setTags] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [employeeId, setEmployeeId] = useState('')
   const [projectId, setProjectId] = useState('')
   const [description, setDescription] = useState('')
@@ -50,9 +51,9 @@ export function QuickAddTransactionDialog({ open, onClose, presetType }: { open:
     const value = Number(amount)
     if (!Number.isFinite(value) || value <= 0) return
     try {
-      await add({ amount: value, transaction_type: type, date: date || undefined, category: category || undefined, description: description || undefined, tags: tags.split(',').map(t=>t.trim()).filter(Boolean), employee_id: employeeId || undefined, project_id: projectId || undefined } as any)
+      await add({ amount: value, transaction_type: type, date: date || undefined, category: category || undefined, description: description || undefined, tags: tags, employee_id: employeeId || undefined, project_id: projectId || undefined } as any)
     } finally {
-      setAmount(''); setCategory(''); setDescription(''); setTags(''); setEmployeeId(''); setProjectId('')
+              setAmount(''); setCategory(''); setDescription(''); setTags([]); setEmployeeId(''); setProjectId('')
       onClose()
     }
   }
@@ -81,7 +82,15 @@ export function QuickAddTransactionDialog({ open, onClose, presetType }: { open:
             }} placeholder="Дата" /></div>
             <div className="md:col-span-6"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Категория" value={category} onChange={(e)=>setCategory(e.target.value)} /></div>
             <div className="md:col-span-12"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Описание" value={description} onChange={(e)=>setDescription(e.target.value)} /></div>
-            <div className="md:col-span-6"><input className="h-9 px-3 rounded border bg-background text-sm w-full" placeholder="Теги (через запятую)" value={tags} onChange={(e)=>setTags(e.target.value)} /></div>
+            <div className="md:col-span-6">
+              <TagCombobox
+                value={tags}
+                onChange={setTags}
+                tagType="transaction_tag"
+                placeholder="Добавьте теги..."
+                className="min-h-[36px]"
+              />
+            </div>
             <div className="md:col-span-3"><Select className="w-full" value={employeeId} onChange={setEmployeeId} options={[{value:'',label:'Сотрудник'},...employees.map(e=>({value:e.id,label:e.name}))]} /></div>
             <div className="md:col-span-3"><Select className="w-full" value={projectId} onChange={setProjectId} options={[{value:'',label:'Проект'},...projects.map(p=>({value:p.id,label:p.name}))]} /></div>
             <div className="md:col-span-12 flex items-center justify-end gap-2 pt-1">

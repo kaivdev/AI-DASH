@@ -3,6 +3,7 @@ import { useReadingList } from '@/stores/useReadingList'
 import { useState } from 'react'
 import { Plus, X, Trash2, Play, CheckSquare, Pencil } from 'lucide-react'
 import { Select } from '@/components/Select'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -96,6 +97,15 @@ export function ReadingListCard() {
             const next = !prev
             if (next) {
               setTitle(''); setUrl(''); setContent(''); setType('article'); setPriority('M'); setTags('')
+              setTimeout(() => {
+                try {
+                  const card = document.querySelector('[data-module-id="reading"]') as HTMLElement | null
+                  const vp = card?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+                  if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' })
+                  const input = card?.querySelector('input[placeholder="Название книги/статьи/видео..."]') as HTMLInputElement | null
+                  if (input) input.focus()
+                } catch {}
+              }, 0)
             }
             return next
           })}
@@ -176,6 +186,19 @@ export function ReadingListCard() {
 
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="space-y-2">
+            {items.length === 0 && (
+              <EmptyState
+                title="Нет данных"
+                description="Добавьте свой первый элемент в список чтения, чтобы начать изучение и развитие"
+                actions={[
+                  {
+                    label: '+ Добавить в список',
+                    onClick: () => setShowAddForm(true),
+                    variant: 'default'
+                  }
+                ]}
+              />
+            )}
             {items.map((item) => (
               <div key={item.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">

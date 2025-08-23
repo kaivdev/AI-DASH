@@ -3,6 +3,7 @@ import { useGoals } from '@/stores/useGoals'
 import { useState } from 'react'
 import { Plus, X, Trash2, PlusCircle, MinusCircle } from 'lucide-react'
 import { Select } from '@/components/Select'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -155,6 +156,19 @@ export function GoalsCard() {
             </AlertDialogContent>
           </AlertDialog>
           <div className="space-y-3">
+            {goals.length === 0 && (
+              <EmptyState
+                title="Нет данных"
+                description="Добавьте свою первую цель, чтобы начать планирование и достижение результатов"
+                actions={[
+                  {
+                    label: '+ Добавить цель',
+                    onClick: () => setShowAddForm(true),
+                    variant: 'default'
+                  }
+                ]}
+              />
+            )}
             {goals.map((goal) => (
               <div key={goal.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">

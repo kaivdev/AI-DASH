@@ -11,7 +11,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { ArrowUpDown, ChevronDown, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import type { Employee, Project, Transaction } from '@/types/core'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatCurrency, formatDate } from '@/lib/format'
 import QuickEditTransactionDialog from './QuickEditTransactionDialog'
+import { useEmployees } from '@/stores/useEmployees'
 
 export type TransactionsDataTableHandle = {
   clearSelection: () => void
@@ -52,6 +53,7 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
     const memoData = React.useMemo(() => data, [data])
     const memoEmployees = React.useMemo(() => employees, [employees])
     const memoProjects = React.useMemo(() => projects, [projects])
+    const formerEmployees = useEmployees((s) => s.formerEmployees)
 
     const rows = React.useMemo<Row[]>(() => {
       const empName = new Map<string, string>()
@@ -64,14 +66,21 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
         if (hoursByTask instanceof Map) return hoursByTask.get(taskId)
         return (hoursByTask as Record<string, number>)[taskId]
       }
-      return memoData.map((t) => ({
-        ...t,
-        employeeName: t.employee_id ? empName.get(t.employee_id) || t.employee_id : '-',
-        projectName: t.project_id ? projName.get(t.project_id) || t.project_id : '-',
-        tagsText: Array.isArray(t.tags) ? t.tags.join(', ') : '',
-        hours: getHours(t.task_id),
-      }))
-    }, [memoData, memoEmployees, memoProjects, hoursByTask])
+      return memoData.map((t) => {
+        const rawName = t.employee_id ? empName.get(t.employee_id) : undefined
+        const archived = t.employee_id ? formerEmployees?.[t.employee_id] : undefined
+        const employeeName = t.employee_id
+          ? rawName || (archived ? `${archived} (уволен)` : t.employee_id)
+          : '-'
+        return ({
+          ...t,
+          employeeName,
+          projectName: t.project_id ? projName.get(t.project_id) || t.project_id : '-',
+          tagsText: Array.isArray(t.tags) ? t.tags.join(', ') : '',
+          hours: getHours(t.task_id),
+        })
+      })
+    }, [memoData, memoEmployees, memoProjects, hoursByTask, formerEmployees])
 
   const handleDelete = React.useCallback((id: string) => {
       onDelete?.(id)
@@ -128,7 +137,13 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
         header: ({ column }) => (
           <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
             Дата
-            <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
+            {column.getIsSorted() === 'desc' ? (
+              <ArrowUp className="ml-1 h-3.5 w-3.5" />
+            ) : column.getIsSorted() === 'asc' ? (
+              <ArrowDown className="ml-1 h-3.5 w-3.5" />
+            ) : (
+              <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
+            )}
           </Button>
         ),
         cell: ({ row }) => <div className="whitespace-nowrap">{formatDate(row.getValue('date'))}</div>,
@@ -147,7 +162,13 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
             onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
           >
             Тип
-            <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+            {column.getIsSorted() === 'desc' ? (
+              <ArrowUp className="ml-1 h-3 w-3 opacity-70" />
+            ) : column.getIsSorted() === 'asc' ? (
+              <ArrowDown className="ml-1 h-3 w-3 opacity-70" />
+            ) : (
+              <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+            )}
           </Button>
         ),
         cell: ({ row }) => (
@@ -172,7 +193,13 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
               onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
             >
               Сумма
-              <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+              {column.getIsSorted() === 'desc' ? (
+                <ArrowUp className="ml-1 h-3 w-3 opacity-70" />
+              ) : column.getIsSorted() === 'asc' ? (
+                <ArrowDown className="ml-1 h-3 w-3 opacity-70" />
+              ) : (
+                <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+              )}
             </Button>
           </div>
         ),
@@ -205,7 +232,13 @@ export const TransactionsDataTable = React.forwardRef<TransactionsDataTableHandl
               }}
             >
               Часы
-              <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+              {column.getIsSorted() === 'desc' ? (
+                <ArrowUp className="ml-1 h-3 w-3 opacity-70" />
+              ) : column.getIsSorted() === 'asc' ? (
+                <ArrowDown className="ml-1 h-3 w-3 opacity-70" />
+              ) : (
+                <ArrowUpDown className="ml-1 h-3 w-3 opacity-70" />
+              )}
             </Button>
           </div>
         ),

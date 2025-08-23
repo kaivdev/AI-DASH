@@ -7,6 +7,7 @@ interface EmployeesState {
   employees: Employee[]
   loading: boolean
   error: string | null
+  formerEmployees: Record<string, string>
   fetchEmployees: (force?: boolean) => Promise<void>
   add: (employee: Omit<Employee, 'id' | 'created_at' | 'updated_at'>) => Promise<void>
   update: (id: string, patch: Partial<Omit<Employee, 'id' | 'created_at' | 'updated_at'>>) => Promise<void>
@@ -53,6 +54,7 @@ export const useEmployees = create<EmployeesState>()(
       employees: seed,
       loading: false,
       error: null,
+      formerEmployees: {},
       
       fetchEmployees: async (force = false) => {
         // Загружаем с сервера только если локально пусто, либо если принудительно
@@ -132,16 +134,19 @@ export const useEmployees = create<EmployeesState>()(
 
       remove: async (id) => {
         set({ loading: true, error: null })
+        const deletedName = get().employees.find((e) => e.id === id)?.name
         try {
           await employeeApi.delete(id)
           set((state) => ({ 
             employees: state.employees.filter((e) => e.id !== id),
+            formerEmployees: deletedName ? { ...state.formerEmployees, [id]: deletedName } : state.formerEmployees,
             loading: false
           }))
         } catch (error) {
           console.error('Failed to delete employee:', error)
           set((state) => ({ 
             employees: state.employees.filter((e) => e.id !== id),
+            formerEmployees: deletedName ? { ...state.formerEmployees, [id]: deletedName } : state.formerEmployees,
             loading: false,
             error: 'Deleted locally (API unavailable)'
           }))
@@ -178,7 +183,7 @@ export const useEmployees = create<EmployeesState>()(
     }),
     { 
       name: 'ai-life-employees',
-      partialize: (state) => ({ employees: state.employees })
+      partialize: (state) => ({ employees: state.employees, formerEmployees: state.formerEmployees })
     }
   )
 ) 

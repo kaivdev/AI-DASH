@@ -72,6 +72,14 @@ export const employeeApi = {
   delete: (id: string) => apiRequest(`/employees/${id}`, {
     method: 'DELETE',
   }),
+  getStats: (id: string, filters: {
+    date_from?: string;
+    date_to?: string;
+    period_type?: string;
+  }) => apiRequest(`/employees/${id}/stats`, {
+    method: 'POST',
+    body: JSON.stringify(filters),
+  }),
 }
 
 // Project API
@@ -126,6 +134,10 @@ export const transactionApi = {
   update: (id: string, data: any) => apiRequest(`/transactions/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
+  }),
+  updateDate: (id: string, dateValue: string) => apiRequest(`/transactions/${id}/date`, {
+    method: 'PUT',
+    body: JSON.stringify({ date: dateValue }),
   }),
   delete: (id: string) => apiRequest(`/transactions/${id}`, {
     method: 'DELETE',
@@ -247,9 +259,63 @@ export const chatApi = {
   clear: (id: string) => apiRequest(`/chat/sessions/${id}/messages`, { method: 'DELETE' }),
 }
 
+// AI Chat API
+export const aiApi = {
+  chat: (query: string, chat_id?: string) => apiRequest<{ message: string }>(`/ai/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ query, ...(chat_id ? { chat_id } : {}) }),
+  }),
+  // command endpoint retained if needed later
+  command: (payload: { query: string, chat_id?: string }) => apiRequest(`/ai/command`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+}
+
 // Invite codes API (owner/admin)
 export const inviteApi = {
   list: () => apiRequest('/invites'),
   create: (code?: string) => apiRequest('/invites', { method: 'POST', body: JSON.stringify({ code }) }),
   deactivate: (id: number) => apiRequest(`/invites/${id}/deactivate`, { method: 'PUT' }),
+}
+
+// User Tags API
+export interface UserTag {
+  id: string
+  user_id: string
+  tag_value: string
+  tag_type: string
+  usage_count: number
+  created_at: string
+  updated_at?: string
+}
+
+export interface UserTagsResponse {
+  tags: UserTag[]
+}
+
+export interface TagSuggestionsResponse {
+  suggestions: string[]
+}
+
+export const userTagsApi = {
+  list: (tagType?: string) => apiRequest<UserTagsResponse>(`/user-tags${tagType ? `?tag_type=${encodeURIComponent(tagType)}` : ''}`),
+  
+  suggestions: (tagType: string, search?: string) => 
+    apiRequest<TagSuggestionsResponse>(`/user-tags/suggestions?tag_type=${encodeURIComponent(tagType)}${search ? `&search=${encodeURIComponent(search)}` : ''}`),
+  
+  create: (tagValue: string, tagType: string) => 
+    apiRequest<UserTag>('/user-tags', {
+      method: 'POST',
+      body: JSON.stringify({ tag_value: tagValue, tag_type: tagType }),
+    }),
+  
+  update: (tagId: string, updates: { tag_value?: string, tag_type?: string }) => 
+    apiRequest<UserTag>(`/user-tags/${tagId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    }),
+  
+  delete: (tagId: string) => 
+    apiRequest<{ message: string }>(`/user-tags/${tagId}`, { method: 'DELETE' }),
 }

@@ -22,6 +22,7 @@ import { Select } from '@/components/Select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useAuth } from '@/stores/useAuth'
 import { Link } from 'react-router-dom'
+import { EmptyState } from '@/components/ui/empty-state'
 
 const priorityColors: Record<Priority, string> = {
   L: 'border-green-300 dark:border-green-500/50 shadow-[0_0_0_1px_rgba(34,197,94,0.15)]',
@@ -162,8 +163,7 @@ export function TasksCard() {
   const user = useAuth((s)=>s.user)
   const isAdmin = (user?.role === 'owner' || user?.role === 'admin')
 
-  const [showForm, setShowForm] = useState(false)
-  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [showAddForm, setShowAddForm] = useState(false)
   const [content, setContent] = useState('')
   const [priority, setPriority] = useState<Priority>('M')
   const [due, setDue] = useState('')
@@ -175,6 +175,7 @@ export function TasksCard() {
 
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailTask, setDetailTask] = useState<Task | null>(null)
+  const [detailEditMode, setDetailEditMode] = useState(false)
 
   // Load data on mount
   useEffect(() => {
@@ -234,22 +235,15 @@ export function TasksCard() {
   }, [tasks])
 
   function onStartEdit(task: Task) {
-    setEditingTask(task)
-    setShowForm(true)
-    setContent(task.content)
-    setPriority(task.priority)
-    setDue(task.due_date || '')
-    setAssignedTo(task.assigned_to || '')
-    setProjectId(task.project_id || '')
-    // прокрутка к началу карточки + фокус на поле задачи
-    setTimeout(() => { 
-      try { 
-        const card = document.querySelector('[data-module-id="tasks"]') || document.querySelector('#tasks'); 
-        card && (card as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' }); 
-        const input = document.querySelector('input[placeholder="Что нужно сделать..."]') as HTMLInputElement | null
-        if (input) input.focus()
-      } catch {}
-    }, 0)
+    setDetailTask(task)
+    setDetailEditMode(true)
+    setDetailOpen(true)
+  }
+
+  function onOpenTask(task: Task) {
+    setDetailTask(task)
+    setDetailEditMode(false)
+    setDetailOpen(true)
   }
 
   function onDelete(taskId: string) {
@@ -285,21 +279,30 @@ export function TasksCard() {
             <button
               className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
               onClick={() => {
-                setShowForm((prev) => {
+                setShowAddForm((prev: boolean) => {
                   const next = !prev
                   if (next) {
-                    setEditingTask(null)
                     setContent('')
                     setPriority('M')
                     setDue('')
                     setAssignedTo('')
                     setProjectId('')
+                    // scroll to top inside card viewport and focus the input
+                    setTimeout(() => {
+                      try {
+                        const card = document.querySelector('[data-module-id="tasks"]') as HTMLElement | null
+                        const vp = card?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+                        if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' })
+                        const input = card?.querySelector('input[placeholder="Что нужно сделать..."]') as HTMLInputElement | null
+                        if (input) input.focus()
+                      } catch {}
+                    }, 0)
                   }
                   return next
                 })
               }}
             >
-              {showForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+              {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
             </button>
           )}
         </div>
@@ -334,17 +337,14 @@ export function TasksCard() {
           projectName={detailTask?.project_id ? projects.find(p => p.id === detailTask?.project_id)?.name ?? null : null}
           employees={employees}
           projects={projects}
-          onClose={() => setDetailOpen(false)}
+          onClose={() => { setDetailOpen(false); setDetailEditMode(false); }}
           onEdit={async (t) => { try { await update(t.id, { content: t.content, priority: t.priority, due_date: t.due_date, assigned_to: t.assigned_to, project_id: t.project_id, hours_spent: t.hours_spent, billable: t.billable, cost_rate_override: (t as any).cost_rate_override, bill_rate_override: (t as any).bill_rate_override, work_status: (t as any).work_status }); } catch {} }}
           onToggle={(id) => onToggle(id)}
           onDelete={(id) => { setDetailOpen(false); onDelete(id) }}
+          startInEditMode={detailEditMode}
         />
 
-        {editingTask && (
-          <div className="flex items-center gap-2"><span className="text-sm text-muted-foreground">Редактирование</span></div>
-        )}
-
-        {showForm && (
+        {showAddForm && (
           <div className="p-3 border rounded bg-muted/10">
             <div className="space-y-3">
               <div>
@@ -427,15 +427,10 @@ export function TasksCard() {
                   const hours = Number((document.getElementById('quick-hours') as HTMLInputElement)?.value || '0') || 0
                   const rateStr = (document.getElementById('quick-rate') as HTMLInputElement)?.value
                   const billable = (document.getElementById('quick-billable') as HTMLInputElement)?.checked ?? true
-                  if (editingTask) {
-                    await update(editingTask.id, { content: isAdmin ? content.trim() : undefined as any, priority: isAdmin ? priority : undefined as any, due_date: isAdmin ? (due || undefined) : undefined as any, assigned_to: isAdmin ? (assignedTo || undefined) : undefined as any, project_id: isAdmin ? (projectId || undefined) : undefined as any, hours_spent: hours, cost_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable: isAdmin ? billable : undefined as any })
-                    setEditingTask(null)
-                  } else {
-                    await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, cost_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable, created_at: undefined as any, updated_at: undefined as any } as any)
-                  }
-                  setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); (document.getElementById('quick-hours') as HTMLInputElement).value='0'; const rateEl=document.getElementById('quick-rate') as HTMLInputElement | null; if(rateEl) rateEl.value=''; (document.getElementById('quick-billable') as HTMLInputElement).checked=true; setShowForm(false)
-                }}>{isAdmin ? 'Сохранить' : 'Списать часы'}</button>
-                {isAdmin && (<button className="h-8 px-3 rounded border text-sm hover:bg-muted/40" onClick={() => { setEditingTask(null); setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); setShowForm(false) }}>Отмена</button>)}
+                  await add({ content: content.trim(), priority, due_date: due || undefined, done: false, assigned_to: assignedTo || undefined, project_id: projectId || undefined, hours_spent: hours, cost_rate_override: isAdmin && rateStr ? Number(rateStr) : undefined, billable, created_at: undefined as any, updated_at: undefined as any } as any)
+                  setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); (document.getElementById('quick-hours') as HTMLInputElement).value='0'; const rateEl=document.getElementById('quick-rate') as HTMLInputElement | null; if(rateEl) rateEl.value=''; (document.getElementById('quick-billable') as HTMLInputElement).checked=true; setShowAddForm(false)
+                }}>{isAdmin ? 'Добавить задачу' : 'Списать часы'}</button>
+                {isAdmin && (<button className="h-8 px-3 rounded border text-sm hover:bg-muted/40" onClick={() => { setContent(''); setDue(''); setAssignedTo(''); setProjectId(''); setShowAddForm(false) }}>Отмена</button>)}
               </div>
             </div>
           </div>
@@ -443,6 +438,21 @@ export function TasksCard() {
 
         <div className="min-h-0 flex-1 overflow-auto relative">
           <div className="space-y-6">
+            {/* Empty state when no tasks */}
+            {tasks.length === 0 && (
+              <EmptyState
+                title="Нет данных"
+                description="Добавьте свою первую задачу, чтобы начать планирование и отслеживание работы"
+                actions={[
+                  {
+                    label: '+ Добавить задачу',
+                    onClick: () => setShowAddForm(true),
+                    variant: 'default'
+                  }
+                ]}
+              />
+            )}
+            
             {/* Ожидают подтверждения */}
             {awaiting.length > 0 && (
               <div>
@@ -457,7 +467,7 @@ export function TasksCard() {
                       onToggle={onToggle}
                       onDelete={(id) => { setPendingDeleteId(id); setConfirmOpen(true) }}
                       onEdit={onStartEdit}
-                      onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }}
+                      onOpen={onOpenTask}
                       isAdmin={isAdmin}
                     />
                   ))}
@@ -465,12 +475,12 @@ export function TasksCard() {
               </div>
             )}
 
-            {overdue.length > 0 && (
+                            {overdue.length > 0 && (
               <div>
                 <h4 className="text-sm font-medium mb-2 text-red-600">Истекшие ({overdue.length})</h4>
                 <div className="space-y-2">
                   {overdue.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={onStartEdit} onOpen={onOpenTask} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -481,7 +491,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Сегодня ({todayList.length})</h4>
                 <div className="space-y-2">
                   {todayList.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={onStartEdit} onOpen={onOpenTask} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -492,7 +502,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Завтра ({tomorrowList.length})</h4>
                 <div className="space-y-2">
                   {tomorrowList.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={onStartEdit} onOpen={onOpenTask} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -503,7 +513,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Будущие ({future.length})</h4>
                 <div className="space-y-2">
                   {future.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={onStartEdit} onOpen={onOpenTask} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -514,7 +524,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2">Без срока ({noDue.length})</h4>
                 <div className="space-y-2">
                   {noDue.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={onStartEdit} onOpen={onOpenTask} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>
@@ -525,7 +535,7 @@ export function TasksCard() {
                 <h4 className="text-sm font-medium mb-2 text-green-600">Выполненные ({completed.length})</h4>
                 <div className="space-y-2">
                   {completed.map(t => (
-                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={(task) => onStartEdit(task)} onOpen={(task) => { setDetailTask(task); setDetailOpen(true) }} isAdmin={isAdmin} />
+                    <TaskItem key={t.id} task={t} employees={employees} projects={projects} onToggle={onToggle} onDelete={(id) => onDelete(id)} onEdit={onStartEdit} onOpen={onOpenTask} isAdmin={isAdmin} />
                   ))}
                 </div>
               </div>

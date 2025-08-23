@@ -1,7 +1,7 @@
 import { Topbar } from './Topbar'
 import { MainGrid } from './MainGrid'
 import { Toaster } from 'sonner'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { LoginPage } from './LoginPage'
 import { AccountPage } from './AccountPage'
 import { RegisterPage } from './RegisterPage'
@@ -10,9 +10,11 @@ import { useAuth } from '@/stores/useAuth'
 import { useEffect } from 'react'
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/app-sidebar'
+import AiChatPage from '@/features/aichat/page'
 
 export function AppShell() {
   const token = useAuth((s) => s.token)
+  const location = useLocation()
 
   useEffect(() => {
     if (!token) return
@@ -85,10 +87,11 @@ export function AppShell() {
       <SidebarInset>
         <div className="min-h-screen flex flex-col">
           <Topbar />
-          <main className="flex-1 min-h-0 w-full overflow-auto p-4 md:p-6 lg:p-8 bg-muted/20">
+          <main className={`flex-1 min-h-0 w-full ${location.pathname === '/chat' ? 'overflow-hidden' : 'overflow-auto p-4 md:p-6 lg:p-8 bg-muted/20'}`}>
             <Routes>
               <Route path="/" element={token ? <MainGrid /> : <Navigate to="/login" replace />} />
               <Route path="/kanban" element={token ? <KanbanPage /> : <Navigate to="/login" replace />} />
+              <Route path="/chat" element={token ? <AiChatPage /> : <Navigate to="/login" replace />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/account" element={token ? <AccountPage /> : <Navigate to="/login" replace />} />

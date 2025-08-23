@@ -276,6 +276,22 @@ setattr(__import__(__name__), 'User_invited_by_marker', True)
 class _UserInviteMixin:
     invited_by_user_id = Column(String, _FK("users.id"), nullable=True)
 
+# --- User Tags model ---
+class UserTag(Base):
+    __tablename__ = "user_tags"
+    
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    tag_value = Column(String, nullable=False)
+    tag_type = Column(String, nullable=False)  # position, project_tag, category, transaction_tag, etc.
+    usage_count = Column(Integer, default=1, nullable=False)  # Счетчик использования для сортировки
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint("user_id", "tag_value", "tag_type", name="uq_user_tags_value_type"),
+    )
+
 # --- Chat models ---
 class ChatSession(Base):
     __tablename__ = "chat_sessions"

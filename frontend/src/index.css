@@ -195,8 +195,4 @@
     unicode-bidi: plaintext !important;
     text-align: left;
   }
-  .hover\:shadow-lg:hover {
-    --tw-shadow: 0 10px 15px -14px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  }
-  }
-
+}

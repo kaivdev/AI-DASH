@@ -79,6 +79,20 @@
 			],
 			"isBackground": true,
 			"group": "build"
+		},
+		{
+			"label": "Build Frontend (one-off)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$eslint-stylish"
+			],
+			"group": "build"
 		}
 	]
 }

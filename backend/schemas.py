@@ -48,6 +48,24 @@ class Employee(EmployeeBase):
     class Config:
         from_attributes = True
 
+# Employee statistics
+class EmployeeStats(BaseModel):
+    total_hours: float
+    total_revenue: float
+    total_salary_cost: float
+    active_projects_count: int
+    completed_tasks: int
+    in_progress_tasks: int
+    actual_hourly_rate: float
+    revenue_per_hour: float
+    profit_margin: float
+    period_label: str
+
+class EmployeeStatsRequest(BaseModel):
+    date_from: Optional[str] = None  # YYYY-MM-DD format
+    date_to: Optional[str] = None    # YYYY-MM-DD format
+    period_type: Optional[str] = None  # 'month', 'quarter', 'custom'
+
 # Project schemas
 class ProjectLinkBase(BaseModel):
     title: str
@@ -373,6 +391,31 @@ class InviteCodeOut(BaseModel):
 
 class InviteCodeCreate(BaseModel):
     code: str | None = None
+
+# --- User Tags schemas ---
+class UserTagBase(BaseModel):
+    tag_value: str
+    tag_type: str
+
+class UserTagCreate(UserTagBase):
+    pass
+
+class UserTagUpdate(BaseModel):
+    tag_value: Optional[str] = None
+    tag_type: Optional[str] = None
+
+class UserTag(UserTagBase):
+    id: str
+    user_id: str
+    usage_count: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class UserTagsResponse(BaseModel):
+    tags: List[UserTag]
 
 # --- AI command schemas ---
 class AICommandRequest(BaseModel):

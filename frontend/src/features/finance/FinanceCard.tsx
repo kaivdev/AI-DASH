@@ -8,6 +8,7 @@ import { FinanceBoardDialog } from './FinanceBoardDialog'
 import { QuickAddTransactionDialog } from './QuickAddTransactionDialog'
 import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, AreaChart, Area } from 'recharts'
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
+import { EmptyState } from '@/components/ui/empty-state'
 // Select removed for static 7-day chart
 
 function getMonthKey(d: string) {
@@ -19,6 +20,7 @@ export function FinanceCard() {
   const remove = useFinance((s) => s.remove)
   const fetchFinance = useFinance((s) => s.fetch)
   const employees = useEmployees((s) => s.employees)
+  const formerEmployees = useEmployees((s) => s.formerEmployees)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
@@ -39,6 +41,13 @@ export function FinanceCard() {
 
   // Per-employee profit
   const perEmployeeAll = useMemo(() => {
+    const displayName = (eid: string) => {
+      const e = employees.find((x) => x.id === eid)
+      if (e) return e.name
+      const former = formerEmployees?.[eid]
+      if (former) return `${former} (уволен)`
+      return eid
+    }
     const map = new Map<string, { income: number; expense: number }>()
     for (const t of txs) {
       const eid = (t as any).employee_id as string | undefined
@@ -48,9 +57,9 @@ export function FinanceCard() {
       else row.expense += t.amount
       map.set(eid, row)
     }
-    const rows = Array.from(map.entries()).map(([eid, v]) => ({ id: eid, name: employees.find(e=>e.id===eid)?.name || eid, income: v.income, expense: v.expense, profit: v.income - v.expense }))
+    const rows = Array.from(map.entries()).map(([eid, v]) => ({ id: eid, name: displayName(eid), income: v.income, expense: v.expense, profit: v.income - v.expense }))
     return rows.sort((a,b)=> b.profit - a.profit)
-  }, [txs, employees])
+  }, [txs, employees, formerEmployees])
 
   // Chart data: статичные 7 дней (локальное ISO, -3..+3 от сегодня)
   const chartData = useMemo(() => {
@@ -247,7 +256,19 @@ export function FinanceCard() {
                 <button className="ml-3 h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => remove(t.id)} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
               </div>
             ))}
-            {lastTx.length === 0 && <div className="text-sm text-muted-foreground text-center py-4">Нет операций</div>}
+            {lastTx.length === 0 && (
+              <EmptyState
+                title="Нет данных"
+                description="Добавьте свою первую транзакцию, чтобы начать отслеживание финансов"
+                actions={[
+                  {
+                    label: '+ Добавить транзакцию',
+                    onClick: () => setQuickOpen(true),
+                    variant: 'default'
+                  }
+                ]}
+              />
+            )}
           </div>
         </div>
       </div>

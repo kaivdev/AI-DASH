@@ -8,8 +8,10 @@ import { Select } from '@/components/Select'
 import { DatePicker } from '@/components/ui/date-picker'
 import { ProjectDetailDrawer } from './ProjectDetailDrawer'
 import { useTasks } from '@/stores/useTasks'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, formatDate } from '@/lib/format'
 import { useAuth } from '@/stores/useAuth'
+import { TagCombobox } from '@/components/ui/tag-combobox'
+import { EmptyState } from '@/components/ui/empty-state'
 
 export function ProjectsCard() {
   const projects = useProjects((s) => s.projects)
@@ -46,7 +48,7 @@ export function ProjectsCard() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [tags, setTags] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
 
@@ -56,19 +58,11 @@ export function ProjectsCard() {
   const [linkType, setLinkType] = useState<'repo' | 'docs' | 'design' | 'other'>('repo')
 
   const [boardOpen, setBoardOpen] = useState(false)
-  const [editId, setEditId] = useState<string>('')
-  const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'paused' | 'cancelled'>('active')
-  const [editStart, setEditStart] = useState('')
-  const [editEnd, setEditEnd] = useState('')
   const updateProject = useProjects((s) => s.update)
-
-  // title/description inline edit
-  const [editTitle, setEditTitle] = useState('')
-  const [editDescription, setEditDescription] = useState('')
-  const [editTagsInput, setEditTagsInput] = useState('')
-
+  
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailProjectId, setDetailProjectId] = useState<string | null>(null)
+  const [editMode, setEditMode] = useState(false)
 
   useEffect(() => {
     function onTitleClick(e: any) {
@@ -83,7 +77,7 @@ export function ProjectsCard() {
     add({
       name: name.trim(),
       description: description.trim(),
-      tags: tags.trim().split(',').map(t => t.trim()).filter(Boolean),
+      tags: tags,
       links: [],
       member_ids: [],
       status: 'active',
@@ -92,34 +86,10 @@ export function ProjectsCard() {
     } as any)
     setName('')
     setDescription('')
-    setTags('')
+    setTags([])
     setStartDate('')
     setEndDate('')
     setShowAddForm(false)
-  }
-
-  function startInlineEdit(p: any) {
-    setEditId(p.id)
-    setEditStatus(p.status)
-    setEditStart(p.start_date || '')
-    setEditEnd(p.end_date || '')
-    setEditTitle(p.name)
-    setEditDescription(p.description || '')
-    setEditTagsInput((p.tags || []).join(', '))
-  }
-
-  function saveInlineEdit() {
-    if (!editId) return
-    const parsedTags = (editTagsInput || '').split(',').map(t=>t.trim()).filter(Boolean)
-    updateProject(editId, { 
-      status: editStatus, 
-      start_date: editStart || undefined, 
-      end_date: editEnd || undefined,
-      name: editTitle?.trim() || undefined,
-      description: editDescription ?? undefined,
-      tags: parsedTags,
-    } as any)
-    setEditId('')
   }
 
   function onAddLink() {
@@ -175,7 +145,21 @@ export function ProjectsCard() {
   isAdmin && (
   <button
           className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
-          onClick={() => setShowAddForm(!showAddForm)}
+          onClick={() => {
+            const next = !showAddForm
+            setShowAddForm(next)
+            if (next) {
+              setTimeout(() => {
+                try {
+                  const card = document.querySelector('[data-module-id="projects"]') as HTMLElement | null
+                  const vp = card?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+                  if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' })
+                  const input = card?.querySelector('input[placeholder="Новый проект"]') as HTMLInputElement | null
+                  if (input) input.focus()
+                } catch {}
+              }, 0)
+            }
+          }}
         >
           {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
         </button>
@@ -202,14 +186,15 @@ export function ProjectsCard() {
         open={detailOpen}
         project={detailProject as any}
         employees={employees}
-        onClose={() => setDetailOpen(false)}
+        onClose={() => { setDetailOpen(false); setEditMode(false); }}
         onEdit={async (id, patch) => { try { await updateProject(id, patch as any) } catch {} }}
-  onRemove={async (id) => { if (!isAdmin) return; try { await remove(id) } catch {} setDetailOpen(false) }}
-  onAddMember={async (pid, eid) => { if (!isAdmin) return; try { await addMember(pid, eid) } catch {} }}
-  onRemoveMember={async (pid, eid) => { if (!isAdmin) return; try { await removeMember(pid, eid) } catch {} }}
+        onRemove={async (id) => { if (!isAdmin) return; try { await remove(id) } catch {} setDetailOpen(false) }}
+        onAddMember={async (pid, eid) => { if (!isAdmin) return; try { await addMember(pid, eid) } catch {} }}
+        onRemoveMember={async (pid, eid) => { if (!isAdmin) return; try { await removeMember(pid, eid) } catch {} }}
         onAddLink={async (pid, link) => { try { await addLink(pid, link as any) } catch {} }}
-  onRemoveLink={async (pid, lid) => { try { await removeLink(pid, lid) } catch {} }}
-  isAdmin={isAdmin}
+        onRemoveLink={async (pid, lid) => { try { await removeLink(pid, lid) } catch {} }}
+        isAdmin={isAdmin}
+        startInEditMode={editMode}
       />
 
       <div className="flex flex-col gap-4 h-full min-h-0">
@@ -239,11 +224,12 @@ export function ProjectsCard() {
               </div>
               <div>
                 <label className="text-xs mb-1 block">Теги (через запятую)</label>
-                <input 
-                  value={tags} 
-                  onChange={(e) => setTags(e.target.value)}
-                  className="h-8 px-3 rounded border bg-background w-full text-sm"
-                  placeholder="react, typescript, frontend"
+                <TagCombobox
+                  value={tags}
+                  onChange={setTags}
+                  tagType="project_tag"
+                  placeholder="Добавьте теги..."
+                  className="min-h-[32px]"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -292,56 +278,61 @@ export function ProjectsCard() {
 
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="space-y-3">
+            {sortedProjects.length === 0 && (
+              <EmptyState
+                title="Нет данных"
+                description="Добавьте свой первый проект, чтобы начать организацию работы и достижение целей"
+                actions={[
+                  {
+                    label: '+ Добавить проект',
+                    onClick: () => setShowAddForm(true),
+                    variant: 'default'
+                  }
+                ]}
+              />
+            )}
             {sortedProjects.map((project) => (
               <div key={project.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1 min-w-0">
-                      {editId === project.id ? (
-                        <input className="h-7 px-2 rounded border bg-background text-sm flex-1" value={editTitle} onChange={(e)=> setEditTitle(e.target.value)} placeholder="Название проекта" />
-                      ) : (
+                                      <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1 min-w-0">
                         <button className="font-medium text-left" onClick={() => { setDetailProjectId(project.id); setDetailOpen(true) }}>{project.name}</button>
-                      )}
-                      <span className={`px-2 py-1 rounded text-xs ${statusColors[project.status]}`}>
-                        {project.status}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground mb-1">Срок: {(project as any).start_date || '—'} → {(project as any).end_date || '—'}</div>
-                    {editId === project.id ? (
-                      <textarea className="px-2 py-2 rounded border bg-background w-full text-sm resize-none mb-2" rows={2} value={editDescription} onChange={(e)=> setEditDescription(e.target.value)} placeholder="Описание проекта" />
-                    ) : (
-                      project.description && (
+                        <span className={`px-2 py-1 rounded text-xs ${statusColors[project.status]}`}>
+                          {project.status}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mb-1">Срок: {(project as any).start_date ? formatDate((project as any).start_date) : '—'} → {(project as any).end_date ? formatDate((project as any).end_date) : '—'}</div>
+                      {project.description && (
                         <div className="text-sm text-muted-foreground mb-2">
                           {project.description}
                         </div>
-                      )
-                    )}
-                    {editId !== project.id && project.tags.length > 0 && (
-                      <div className="mb-2 min-w-0">
-                        <div className="flex flex-wrap gap-1">
-                          {project.tags.map((tag, i) => (
-                            <span key={i} className="px-2 py-1 bg-gray-100 text-gray-700 dark:bg-purple-500/10 dark:text-purple-200 dark:ring-1 dark:ring-purple-500/20 rounded text-xs">
-                              {tag}
-                            </span>
-                          ))}
+                      )}
+                      {project.tags.length > 0 && (
+                        <div className="mb-2 min-w-0">
+                          <div className="flex flex-wrap gap-1">
+                            {project.tags.map((tag, i) => (
+                              <span key={i} className="px-2 py-1 bg-gray-100 text-gray-700 dark:bg-purple-500/10 dark:text-purple-200 dark:ring-1 dark:ring-purple-500/20 rounded text-xs">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {isAdmin && (
-                      <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => startInlineEdit(project)} title="Редактировать" aria-label="Редактировать">
-                        <Pencil className="h-3.5 w-3.5" />
+                      )}
+                    </div>
+                                      <div className="flex items-center gap-2">
+                      {isAdmin && (
+                        <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => { setDetailProjectId(project.id); setEditMode(true); setDetailOpen(true); }} title="Редактировать" aria-label="Редактировать">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      <button 
+                        className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
+                        onClick={() => remove(project.id)}
+                        title="Удалить" aria-label="Удалить"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
-                    )}
-                    <button 
-                      className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-                      onClick={() => remove(project.id)}
-                      title="Удалить" aria-label="Удалить"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                    </div>
                                                  </div>
 
                 {/* Task counts */}
@@ -370,40 +361,7 @@ export function ProjectsCard() {
                   })()}
                 </div>
 
-                 {editId === project.id && (
-                  <div className="mb-2 p-2 border rounded bg-muted/10 text-xs flex flex-wrap items-center gap-2">
-                    <span className="text-muted-foreground">Статус</span>
-                    <div className="w-[160px]"><Select value={editStatus} onChange={(v)=>setEditStatus(v as any)} options={[{value:'active',label:'active'},{value:'completed',label:'completed'},{value:'paused',label:'paused'},{value:'cancelled',label:'cancelled'}]} /></div>
-                    <span className="ml-2 text-muted-foreground">Начало</span>
-                    <div className="w-[160px]"><DatePicker 
-                      date={editStart ? new Date(editStart) : undefined} 
-                      onDateChange={(newDate) => {
-                        if (newDate === undefined) { setEditStart(''); return }
-                        const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
-                        setEditStart(t.toISOString().slice(0, 10))
-                      }} 
-                      placeholder="Начало"
-                      className="w-full"
-                    /></div>
-                    <span className="ml-2 text-muted-foreground">Окончание</span>
-                    <div className="w-[160px]"><DatePicker 
-                      date={editEnd ? new Date(editEnd) : undefined} 
-                      onDateChange={(newDate) => {
-                        if (newDate === undefined) { setEditEnd(''); return }
-                        const t = new Date(newDate.getTime() - newDate.getTimezoneOffset() * 60000)
-                        setEditEnd(t.toISOString().slice(0, 10))
-                      }} 
-                      placeholder="Окончание"
-                      className="w-full"
-                    /></div>
-                    <span className="ml-2 text-muted-foreground">Теги</span>
-                    <input className="h-7 px-2 rounded border bg-background flex-1 min-w-[180px]" value={editTagsInput} onChange={(e)=> setEditTagsInput(e.target.value)} placeholder="react, ts" />
-                    <div className="ml-auto flex items-center gap-2">
-                      <button className="h-7 px-2 rounded border hover:bg-muted/40" onClick={saveInlineEdit}>Сохранить</button>
-                      <button className="h-7 px-2 rounded border hover:bg-muted/40" onClick={()=>setEditId('')}>Отмена</button>
-                    </div>
-                  </div>
-                )}
+ 
 
                 {project.links.length > 0 && (
                   <div className="mb-2">

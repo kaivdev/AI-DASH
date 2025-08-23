@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { NotesDrawer } from './NotesDrawer'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,7 +57,17 @@ export function NotesCard() {
         </div>
         <div className="min-h-0 flex-1 overflow-auto space-y-2">
           {notes.length === 0 && (
-            <div className="text-sm text-muted-foreground">No notes yet.</div>
+            <EmptyState
+              title="Нет данных"
+              description="Добавьте свою первую заметку, чтобы начать организацию своих мыслей и идей"
+              actions={[
+                {
+                  label: '+ Добавить заметку',
+                  onClick: openCreate,
+                  variant: 'default'
+                }
+              ]}
+            />
           )}
           {notes.map((n) => (
             <div key={n.id} className="rounded border p-3 cursor-pointer overflow-hidden" onClick={() => openEdit(n)}>
