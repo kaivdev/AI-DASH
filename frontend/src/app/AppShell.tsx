@@ -82,7 +82,7 @@ export function AppShell() {
   }, [token])
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={false}>
       <AppSidebar />
       <SidebarInset>
         <div className="min-h-screen flex flex-col">
