@@ -50,7 +50,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
   const handleSelectionChange = useMemo(() => (ids: string[]) => setSelected(new Set(ids)), [])
 
   // Add period presets state
-  const [preset, setPreset] = useState<'7'|'30'|'90'|'all'>('all')
+  const [preset, setPreset] = useState<'7'|'30'|'90'|'all'>('30')
 
   // Apply preset to date filters
   useEffect(() => {
@@ -64,6 +64,11 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     const n = preset==='7'?7:preset==='30'?30:90
     const start = new Date(today); start.setDate(today.getDate() - (n-1))
     setDateFrom(toLocalISO(start)); setDateTo(toLocalISO(today))
+  }, [preset])
+
+  // When switching to 'Все', show месяцы автоматически
+  useEffect(() => {
+    if (preset === 'all') setChartMode('months')
   }, [preset])
 
   const onCloseRef = useRef(onClose)
@@ -113,15 +118,14 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
     }
 
     if (chartMode === 'days') {
-      // Строим диапазон по dateFrom/dateTo, если заданы, иначе 7 дней вокруг сегодня
+      // Строим диапазон по dateFrom/dateTo, если заданы, иначе последние 7 дней, сегодня справа
       let start: string
       let end: string
       if (dateFrom && dateTo) { start = dateFrom; end = dateTo }
       else {
         const today = new Date()
-        const s = new Date(today); s.setDate(today.getDate() - 3)
-        const e = new Date(today); e.setDate(today.getDate() + 3)
-        start = toLocalISO(s); end = toLocalISO(e)
+        const s = new Date(today); s.setDate(today.getDate() - 6)
+        start = toLocalISO(s); end = toLocalISO(today)
       }
       // Сгенерировать список дней включительно
       const range: string[] = []
@@ -145,7 +149,7 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
       return { lineData: range.map((day) => ({ date: day, ...daySum.get(day)! })), chartLabel: `${range.length} дн.` }
     }
 
-    // months mode: по месяцам в пределах dateFrom/dateTo или последние 6 мес
+    // months mode: по месяцам в пределах dateFrom/dateTo или весь период до текущего месяца
     const rangeM: string[] = []
     if (dateFrom && dateTo) {
       const [sy, sm] = dateFrom.split('-').map(Number)
@@ -156,11 +160,30 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
         m++; if (m > 12) { m = 1; y++ }
       }
     } else {
+      // preset 'all': от самого раннего месяца транзакций до текущего месяца (сегодня справа)
+      let minYm: string | null = null
+      for (const t of txs) {
+        const ym = t.date.slice(0, 7)
+        if (!minYm || ym < minYm) minYm = ym
+      }
       const now = new Date()
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-        const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-        rangeM.push(ym)
+      const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      if (!minYm) {
+        // если нет транзакций, показать последние 6 месяцев до текущего
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+          const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+          rangeM.push(ym)
+        }
+      } else {
+        const [sy, sm] = minYm.split('-').map(Number)
+        let y = sy!, m = sm!
+        while (true) {
+          const ym = `${y}-${String(m).padStart(2, '0')}`
+          rangeM.push(ym)
+          if (ym === currentYm) break
+          m++; if (m > 12) { m = 1; y++ }
+        }
       }
     }
     const sumM = new Map<string, { income: number; expense: number }>()
@@ -440,8 +463,12 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                             : `${value.slice(5,7)}.${value.slice(2,4)}`   // MM.YY
                         }
                       />
-                      <YAxis hide />
-                      <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                      <YAxis
+                        hide={false}
+                        width={56}
+                        tickFormatter={(v: number) => formatCurrency(Math.round(v), 'RUB')}
+                      />
+                      <ChartTooltip cursor={{ strokeDasharray: '3 3' }} content={<ChartTooltipContent indicator="dot" />} />
                       <Area
                         dataKey="expense"
                         name="расход"
@@ -450,6 +477,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                         fillOpacity={0.3}
                         stroke="var(--color-expense)"
                         strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
                       />
                       <Area
                         dataKey="income"
@@ -459,6 +488,8 @@ export function FinanceBoardDialog({ open, onClose, presetType }: { open: boolea
                         fillOpacity={0.3}
                         stroke="var(--color-income)"
                         strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
                       />
                       <ChartLegend content={<ChartLegendContent />} />
                     </AreaChart>

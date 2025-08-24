@@ -17,6 +17,7 @@ import { useProjects } from '@/stores/useProjects'
 import { useTasks } from '@/stores/useTasks'
 import { useFinance } from '@/stores/useFinance'
 import { calculateEmployeeStats, formatCurrency, formatHours } from './employeeUtils'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 
 interface EmployeeBoardDialogProps {
   open: boolean
@@ -33,6 +34,7 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   const [name, setName] = useState('')
   const [position, setPosition] = useState('')
@@ -157,9 +159,17 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
                 {filtered.map((e) => (
                   <div key={e.id} className={`px-3 py-3 border-b last:border-b-0 cursor-pointer hover:bg-muted/5 transition-colors ${selectedEmployeeId === e.id ? 'bg-muted/10' : ''}`} onClick={() => setSelectedEmployeeId(e.id)}>
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{e.name}</div>
-                        <div className="text-xs text-muted-foreground">{e.position} • {e.email}</div>
+                      <div className="flex items-start gap-2">
+                        <Avatar className="h-6 w-6 mt-0.5">
+                          <AvatarImage src={(e as any).avatar_url} alt={e.name} />
+                          <AvatarFallback className="text-[10px]">
+                            {e.name.split(' ').map((s) => (s || '').trim()[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="font-medium">{e.name}</div>
+                          <div className="text-xs text-muted-foreground">{e.position} • {e.email}</div>
+                        </div>
                       </div>
                       {isAdmin && (
                         <button className="h-7 w-7 rounded border inline-flex items-center justify-center" onClick={(ev) => { ev.stopPropagation(); setPendingDeleteId(e.id); setConfirmOpen(true) }} title="Удалить" aria-label="Удалить"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -308,7 +318,7 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
             </div>
           )}
 
-          <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null) } }}>
+          <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null); setDeleteConfirmText('') } }}>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Удалить сотрудника?</AlertDialogTitle>
@@ -316,9 +326,19 @@ export function EmployeeBoardDialog({ open, employees, onClose, onAdd, onRemove,
                   Это действие нельзя отменить. Сотрудник будет удален.
                 </AlertDialogDescription>
               </AlertDialogHeader>
+              {/* Keyword confirmation */}
+              <div className="px-1 pb-2">
+                <div className="text-sm mb-2">Для подтверждения удаления введите слово <span className="font-semibold">"уволен"</span>.</div>
+                <input
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                  placeholder="Введите: уволен"
+                  value={deleteConfirmText}
+                  onChange={(e)=> setDeleteConfirmText(e.target.value)}
+                />
+              </div>
               <AlertDialogFooter>
                 <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
-                <AlertDialogAction onClick={async ()=>{ if(pendingDeleteId){ try { await onRemove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null) }}>Удалить</AlertDialogAction>
+                <AlertDialogAction disabled={deleteConfirmText.trim().toLowerCase() !== 'уволен'} onClick={async ()=>{ if(pendingDeleteId){ try { await onRemove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null); setDeleteConfirmText('') }}>Удалить</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

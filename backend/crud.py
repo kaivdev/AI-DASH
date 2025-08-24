@@ -417,9 +417,19 @@ def update_project(db: Session, project_id: str, project: schemas.ProjectUpdate)
 def delete_project(db: Session, project_id: str) -> bool:
     db_project = get_project(db, project_id)
     if db_project:
-        db.delete(db_project)
-        db.commit()
-        return True
+        try:
+            # Nullify references in dependent tables to satisfy FK constraints (PostgreSQL)
+            db.query(models.Transaction).filter(models.Transaction.project_id == project_id).update({models.Transaction.project_id: None}, synchronize_session=False)
+            db.query(models.Task).filter(models.Task.project_id == project_id).update({models.Task.project_id: None}, synchronize_session=False)
+            db.flush()
+
+            # Delete the project itself; links/members are configured with cascade delete-orphan
+            db.delete(db_project)
+            db.commit()
+            return True
+        except Exception:
+            db.rollback()
+            raise
     return False
 
 def add_project_member(db: Session, project_id: str, employee_id: str) -> bool:
@@ -696,6 +706,30 @@ def generate_task_finance_if_needed(db: Session, task_id: str) -> Optional[model
             db_task.income_tx_id = inc_tx.id
     db.commit()
     db.refresh(db_task)
+    return db_task
+
+# New: rollback finance when task leaves completed/approved state
+
+def rollback_task_finance_if_any(db: Session, task_id: str) -> Optional[models.Task]:
+    db_task = get_task(db, task_id)
+    if not db_task:
+        return None
+    changed = False
+    try:
+        if getattr(db_task, "income_tx_id", None):
+            db.query(models.Transaction).filter(models.Transaction.id == db_task.income_tx_id).delete(synchronize_session=False)
+            db_task.income_tx_id = None
+            changed = True
+        if getattr(db_task, "expense_tx_id", None):
+            db.query(models.Transaction).filter(models.Transaction.id == db_task.expense_tx_id).delete(synchronize_session=False)
+            db_task.expense_tx_id = None
+            changed = True
+        if changed:
+            db.commit()
+            db.refresh(db_task)
+    except Exception:
+        db.rollback()
+        # best-effort; return current state
     return db_task
 
 def delete_task(db: Session, task_id: str) -> bool:

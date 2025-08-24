@@ -3,6 +3,7 @@ import { useProjects } from '@/stores/useProjects'
 import { useEmployees } from '@/stores/useEmployees'
 import { useEffect, useState, useMemo } from 'react'
 import { ProjectBoardDialog } from './ProjectBoardDialog'
+import { QuickAddProjectDialog } from './QuickAddProjectDialog'
 import { Pencil, Trash2, Plus, X } from 'lucide-react'
 import { Select } from '@/components/Select'
 import { DatePicker } from '@/components/ui/date-picker'
@@ -12,6 +13,8 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { useAuth } from '@/stores/useAuth'
 import { TagCombobox } from '@/components/ui/tag-combobox'
 import { EmptyState } from '@/components/ui/empty-state'
+import { useFinance } from '@/stores/useFinance'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 export function ProjectsCard() {
   const projects = useProjects((s) => s.projects)
@@ -21,6 +24,7 @@ export function ProjectsCard() {
   const add = useProjects((s) => s.add)
   const addLink = useProjects((s) => s.addLink)
   const tasks = useTasks((s) => s.tasks)
+  const txs = useFinance((s) => s.txs)
   const taskCounts = useMemo(() => {
     const m = new Map<string, { total: number; open: number; done: number }>()
     for (const t of tasks) {
@@ -63,6 +67,12 @@ export function ProjectsCard() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailProjectId, setDetailProjectId] = useState<string | null>(null)
   const [editMode, setEditMode] = useState(false)
+  const [quickAddOpen, setQuickAddOpen] = useState(false)
+
+  // Confirm delete state
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   useEffect(() => {
     function onTitleClick(e: any) {
@@ -145,23 +155,9 @@ export function ProjectsCard() {
   isAdmin && (
   <button
           className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
-          onClick={() => {
-            const next = !showAddForm
-            setShowAddForm(next)
-            if (next) {
-              setTimeout(() => {
-                try {
-                  const card = document.querySelector('[data-module-id="projects"]') as HTMLElement | null
-                  const vp = card?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
-                  if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' })
-                  const input = card?.querySelector('input[placeholder="Новый проект"]') as HTMLInputElement | null
-                  if (input) input.focus()
-                } catch {}
-              }, 0)
-            }
-          }}
+          onClick={() => setQuickAddOpen(true)}
         >
-          {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+          <Plus className="h-4 w-4" /> Добавить
         </button>
   )
       }
@@ -172,7 +168,7 @@ export function ProjectsCard() {
          employees={employees}
          onClose={() => setBoardOpen(false)}
          onAdd={(p) => isAdmin ? add(p as any) : undefined}
-         onRemove={(id) => { if (isAdmin) remove(id) }}
+        onRemove={(id) => { if (!isAdmin) return; setPendingDeleteId(id); setConfirmOpen(true) }}
          onAddMember={(pid, eid) => isAdmin ? addMember(pid, eid) : undefined}
          onRemoveMember={(pid, eid) => isAdmin ? removeMember(pid, eid) : undefined}
          onAddLink={(pid, link) => addLink(pid, link as any)}
@@ -188,13 +184,18 @@ export function ProjectsCard() {
         employees={employees}
         onClose={() => { setDetailOpen(false); setEditMode(false); }}
         onEdit={async (id, patch) => { try { await updateProject(id, patch as any) } catch {} }}
-        onRemove={async (id) => { if (!isAdmin) return; try { await remove(id) } catch {} setDetailOpen(false) }}
+        onRemove={async (id) => { if (!isAdmin) return; setPendingDeleteId(id); setConfirmOpen(true) }}
         onAddMember={async (pid, eid) => { if (!isAdmin) return; try { await addMember(pid, eid) } catch {} }}
         onRemoveMember={async (pid, eid) => { if (!isAdmin) return; try { await removeMember(pid, eid) } catch {} }}
         onAddLink={async (pid, link) => { try { await addLink(pid, link as any) } catch {} }}
         onRemoveLink={async (pid, lid) => { try { await removeLink(pid, lid) } catch {} }}
         isAdmin={isAdmin}
         startInEditMode={editMode}
+      />
+
+      <QuickAddProjectDialog
+        open={quickAddOpen}
+        onClose={() => setQuickAddOpen(false)}
       />
 
       <div className="flex flex-col gap-4 h-full min-h-0">
@@ -327,7 +328,7 @@ export function ProjectsCard() {
                       )}
                       <button 
                         className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40"
-                        onClick={() => remove(project.id)}
+                        onClick={() => { setPendingDeleteId(project.id); setConfirmOpen(true) }}
                         title="Удалить" aria-label="Удалить"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -347,15 +348,13 @@ export function ProjectsCard() {
                 <div className="mb-2 text-xs text-muted-foreground">
                   {(() => {
                     const projTasks = tasks.filter(t => (t as any).project_id === project.id)
-                    const totalHours = projTasks.reduce((s, t) => s + (t.hours_spent || 0), 0)
-                    const billableSum = isAdmin ? projTasks.filter(t => t.billable).reduce((s, t) => {
-                      const rate = (((t as any).applied_bill_rate ?? (t as any).bill_rate_override) ?? 0)
-                      return s + (rate * (t.hours_spent || 0))
-                    }, 0) : null
+                    const approvedDone = projTasks.filter(t => t.done && (t as any).approved === true)
+                    const totalHours = approvedDone.reduce((s, t) => s + (t.hours_spent || 0), 0)
+                    const incomeSum = isAdmin ? txs.filter(tx => (tx as any).project_id === project.id && (tx as any).transaction_type === 'income').reduce((s, tx) => s + tx.amount, 0) : null
                     return (
                       <div className="flex flex-wrap gap-4">
                         <span>Итого часы: <b>{totalHours}</b></span>
-                        {isAdmin && <span>Итого сумма (по биллабельным): <b>{formatCurrency(billableSum as any, 'RUB')}</b></span>}
+                        {isAdmin && <span>Итого сумма (по биллабельным): <b>{formatCurrency(incomeSum as any, 'RUB')}</b></span>}
                       </div>
                     )
                   })()}
@@ -459,6 +458,31 @@ export function ProjectsCard() {
           </div>
         </div>
       </div>
+
+      {/* Confirm delete dialog */}
+      <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null); setDeleteConfirmText('') } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить проект?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Это действие нельзя отменить. Проект будет удален.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-1 pb-2">
+            <div className="text-sm mb-2">Для подтверждения удаления введите слово <span className="font-semibold">"удалить"</span>.</div>
+            <input
+              className="h-9 px-3 rounded border bg-background w-full text-sm"
+              placeholder="Введите: удалить"
+              value={deleteConfirmText}
+              onChange={(e)=> setDeleteConfirmText(e.target.value)}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+            <AlertDialogAction disabled={deleteConfirmText.trim().toLowerCase() !== 'удалить'} onClick={async ()=>{ if(pendingDeleteId){ try { await remove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null); setDetailOpen(false); setDeleteConfirmText('') }}>Удалить</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ModuleCard>
   )
 } 

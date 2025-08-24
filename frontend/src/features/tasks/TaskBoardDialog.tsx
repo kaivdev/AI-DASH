@@ -5,6 +5,7 @@ import { Pencil, CheckSquare, Square, Trash2, X, PlusCircle } from 'lucide-react
 import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
 import { Checkbox } from '@/components/ui/checkbox'
+import { useFinance } from '@/stores/useFinance'
 
 interface TaskBoardDialogProps {
   open: boolean
@@ -38,6 +39,7 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
   const [newDue, setNewDue] = useState('')
   const [newAssignee, setNewAssignee] = useState('')
   const [newProject, setNewProject] = useState('')
+  const fetchFinance = useFinance((s) => s.fetch)
 
   const today = new Date().toISOString().slice(0, 10)
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
@@ -94,6 +96,7 @@ export function TaskBoardDialog({ open, tasks, employees, projects, onClose, onO
     const ids = Array.from(selected)
     await Promise.all(ids.map((id) => Promise.resolve(onToggle(id))))
     setSelected(new Set())
+    try { await fetchFinance() } catch {}
   }
 
   async function onBulkDelete() {

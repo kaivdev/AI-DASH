@@ -4,6 +4,7 @@ import type { Project } from '@/types/core'
 import { Plus, X, Trash2, Pencil } from 'lucide-react'
 import { Select } from '@/components/Select'
 import { DatePicker } from '@/components/ui/date-picker'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 interface ProjectBoardDialogProps {
   open: boolean
@@ -23,6 +24,9 @@ interface ProjectBoardDialogProps {
 
 export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, onRemove, onAddMember, onRemoveMember, onAddLink, onRemoveLink, onUpdateStatus, onUpdateProject, onUpdateLink }: ProjectBoardDialogProps) {
   const [show, setShow] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   // Quick add
   const [name, setName] = useState('')
@@ -357,7 +361,7 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
                           <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={()=> { setEditProjectId(p.id); setEditName(p.name); setEditDescription(p.description || ''); setEditTagsInput((p.tags || []).join(', ')) }} title="Редактировать" aria-label="Редактировать">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
-                          <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => onRemove(p.id)} title="Удалить" aria-label="Удалить">
+                          <button className="h-7 w-7 rounded border inline-flex items-center justify-center hover:bg-muted/40" onClick={() => { setPendingDeleteId(p.id); setConfirmOpen(true) }} title="Удалить" aria-label="Удалить">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </>
@@ -371,6 +375,29 @@ export function ProjectBoardDialog({ open, projects, employees, onClose, onAdd, 
               )}
             </div>
           </div>
+          <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null); setDeleteConfirmText('') } }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Удалить проект?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Это действие нельзя отменить. Проект будет удален.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="px-1 pb-2">
+                <div className="text-sm mb-2">Для подтверждения удаления введите слово <span className="font-semibold">"удалить"</span>.</div>
+                <input
+                  className="h-9 px-3 rounded border bg-background w-full text-sm"
+                  placeholder="Введите: удалить"
+                  value={deleteConfirmText}
+                  onChange={(e)=> setDeleteConfirmText(e.target.value)}
+                />
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
+                <AlertDialogAction disabled={deleteConfirmText.trim().toLowerCase() !== 'удалить'} onClick={()=>{ if (pendingDeleteId) onRemove(pendingDeleteId); setConfirmOpen(false); setPendingDeleteId(null); setDeleteConfirmText('') }}>Удалить</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     </div>

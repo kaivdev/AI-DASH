@@ -3,6 +3,7 @@ import { useEmployees } from '@/stores/useEmployees'
 import { formatCurrency } from '@/lib/format'
 import { useEffect, useMemo, useState } from 'react'
 import { EmployeeBoardDialog } from './EmployeeBoardDialog'
+import { QuickAddEmployeeDialog } from './QuickAddEmployeeDialog'
 import { Plus, X, Trash2, ArrowUpRight } from 'lucide-react'
 import { EmployeeDetailDrawer } from './EmployeeDetailDrawer'
 import { useAuth } from '@/stores/useAuth'
@@ -18,6 +19,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { toast } from 'sonner'
 
 export function EmployeesCard() {
   const employees = useEmployees((s) => s.employees)
@@ -50,6 +53,8 @@ export function EmployeesCard() {
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [quickAddOpen, setQuickAddOpen] = useState(false)
 
   useEffect(() => {
     fetchEmployees()
@@ -64,7 +69,10 @@ export function EmployeesCard() {
   }, [])
 
   async function onAdd() {
-    if (!name.trim() || !position.trim()) return
+    if (!name.trim() || !position.trim()) {
+      toast.error('Заполните поля Имя и Должность')
+      return
+    }
     await add({
       name: name.trim(),
       position: position.trim(),
@@ -115,23 +123,9 @@ export function EmployeesCard() {
         isAdmin && (
           <button
             className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
-            onClick={() => {
-              const next = !showAddForm
-              setShowAddForm(next)
-              if (next) {
-                setTimeout(() => {
-                  try {
-                    const card = document.querySelector('[data-module-id="employees"]') as HTMLElement | null
-                    const vp = card?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
-                    if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' })
-                    const input = card?.querySelector('input[placeholder="Иван Иванов"]') as HTMLInputElement | null
-                    if (input) input.focus()
-                  } catch {}
-                }, 0)
-              }
-            }}
+            onClick={() => setQuickAddOpen(true)}
           >
-            {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+            <Plus className="h-4 w-4" /> Добавить
           </button>
         )
       }
@@ -154,6 +148,11 @@ export function EmployeesCard() {
         onDelete={async (id) => { if (!isAdmin) return; setPendingDeleteId(id); setConfirmOpen(true) }}
         onUpdateStatus={async (id, s, t) => { try { await updateStatus(id, s, t) } catch {} }}
   isAdmin={isAdmin}
+      />
+
+      <QuickAddEmployeeDialog
+        open={quickAddOpen}
+        onClose={() => setQuickAddOpen(false)}
       />
 
       <div className="flex flex-col gap-4 h-full min-h-0">
@@ -243,6 +242,7 @@ export function EmployeesCard() {
             <button 
               className="h-8 px-3 rounded border text-sm bg-primary text-primary-foreground inline-flex items-center gap-2"
               onClick={onAdd}
+              disabled={!name.trim() || !position.trim()}
             >
               <Plus className="h-4 w-4" /> Добавить сотрудника
             </button>
@@ -267,12 +267,21 @@ export function EmployeesCard() {
             {orderedEmployees.map((emp) => (
               <div key={emp.id} className="p-3 border rounded">
                 <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <button className="font-medium text-left" onClick={() => { setDetailEmployeeId(emp.id); setDetailOpen(true) }}>{emp.name}</button>
-                    <div className="text-sm text-muted-foreground">{emp.position}</div>
-                    {emp.email && (
-                      <div className="text-xs text-muted-foreground">{emp.email}</div>
-                    )}
+                  <div className="flex items-start gap-2">
+                    <Avatar className="h-6 w-6 mt-0.5">
+                      {/* backend currently has no employee avatar; keep src possibly on future field */}
+                      <AvatarImage src={(emp as any).avatar_url} alt={emp.name} />
+                      <AvatarFallback className="text-[10px]">
+                        {emp.name.split(' ').map((s) => (s || '').trim()[0]).filter(Boolean).slice(0,2).join('').toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <button className="font-medium text-left" onClick={() => { setDetailEmployeeId(emp.id); setDetailOpen(true) }}>{emp.name}</button>
+                      <div className="text-sm text-muted-foreground">{emp.position}</div>
+                      {emp.email && (
+                        <div className="text-xs text-muted-foreground">{emp.email}</div>
+                      )}
+                    </div>
                   </div>
                   {isAdmin && (
                     <button 
@@ -389,7 +398,7 @@ export function EmployeesCard() {
           </div>
         </div>
       </div>
-      <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null) } }}>
+      <AlertDialog open={confirmOpen} onOpenChange={(o)=>{ if(!o){ setConfirmOpen(false); setPendingDeleteId(null); setDeleteConfirmText('') } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить сотрудника?</AlertDialogTitle>
@@ -397,9 +406,19 @@ export function EmployeesCard() {
               Это действие нельзя отменить. Сотрудник будет удален.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {/* Keyword confirmation */}
+          <div className="px-1 pb-2">
+            <div className="text-sm mb-2">Для подтверждения удаления введите слово <span className="font-semibold">"уволен"</span>.</div>
+            <input
+              className="h-9 px-3 rounded border bg-background w-full text-sm"
+              placeholder="Введите: уволен"
+              value={deleteConfirmText}
+              onChange={(e)=> setDeleteConfirmText(e.target.value)}
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={()=>{ setConfirmOpen(false); setPendingDeleteId(null) }}>Отмена</AlertDialogCancel>
-            <AlertDialogAction onClick={async ()=>{ if(pendingDeleteId){ try { await remove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null); setDetailOpen(false) }}>Удалить</AlertDialogAction>
+            <AlertDialogAction disabled={deleteConfirmText.trim().toLowerCase() !== 'уволен'} onClick={async ()=>{ if(pendingDeleteId){ try { await remove(pendingDeleteId) } catch {} } setConfirmOpen(false); setPendingDeleteId(null); setDetailOpen(false); setDeleteConfirmText('') }}>Удалить</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

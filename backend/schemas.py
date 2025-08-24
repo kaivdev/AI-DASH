@@ -44,6 +44,8 @@ class Employee(EmployeeBase):
     id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # Optional avatar URL from linked user profile
+    avatar_url: Optional[str] = None
 
     class Config:
         from_attributes = True

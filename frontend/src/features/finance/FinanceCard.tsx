@@ -61,7 +61,7 @@ export function FinanceCard() {
     return rows.sort((a,b)=> b.profit - a.profit)
   }, [txs, employees, formerEmployees])
 
-  // Chart data: статичные 7 дней (локальное ISO, -3..+3 от сегодня)
+  // Chart data: статичные 7 дней (локальное ISO, последние 7 дней, сегодня справа)
   const chartData = useMemo(() => {
     const toLocalISO = (d: Date) => {
       const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
@@ -69,9 +69,8 @@ export function FinanceCard() {
     }
     const range: string[] = []
     const today = new Date()
-    for (let offset = -3; offset <= 3; offset++) {
-      const d = new Date(today)
-      d.setDate(today.getDate() + offset)
+    const start = new Date(today); start.setDate(today.getDate() - 6)
+    for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
       range.push(toLocalISO(d))
     }
     const byDay = new Map<string, { date: string; income: number; expense: number }>()

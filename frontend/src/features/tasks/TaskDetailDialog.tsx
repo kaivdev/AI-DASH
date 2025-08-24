@@ -231,29 +231,32 @@ export function TaskDetailDialog({ open, task, employeeName, projectName, employ
               </div>
             </div>
             {isAdmin && (
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs mb-1 block">Себестоимость (₽/ч, override)</label>
-                  <input 
-                    className="h-9 px-3 rounded border bg-background w-full text-sm" 
-                    type="number" 
-                    value={costOverride} 
-                    onChange={(e)=>setCostOverride(e.target.value)} 
-                    placeholder="Пусто — из сотрудника/проекта" 
-                  />
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs mb-1 block">Себестоимость сотрудника (₽/ч)</label>
+                    <input 
+                      className="h-9 px-3 rounded border bg-background w-full text-sm" 
+                      type="number" 
+                      value={costOverride} 
+                      onChange={(e)=>setCostOverride(e.target.value)} 
+                      placeholder="Из профиля сотрудника" 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs mb-1 block">Тариф для клиента (₽/ч)</label>
+                    <input 
+                      className="h-9 px-3 rounded border bg-background w-full text-sm" 
+                      type="number" 
+                      value={billOverride} 
+                      onChange={(e)=>setBillOverride(e.target.value)} 
+                      placeholder="Из профиля сотрудника" 
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs mb-1 block">Биллинг (₽/ч, override)</label>
-                  <input 
-                    className="h-9 px-3 rounded border bg-background w-full text-sm" 
-                    type="number" 
-                    value={billOverride} 
-                    onChange={(e)=>setBillOverride(e.target.value)} 
-                    placeholder="Пусто — из сотрудника/проекта" 
-                  />
-                </div>
-                <label className="flex items-center gap-2 mt-6 text-sm">
-                  <input type="checkbox" checked={billable} onChange={(e)=>setBillable(e.target.checked)} /> Биллабельно
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={billable} onChange={(e)=>setBillable(e.target.checked)} /> 
+                  Оплачиваемая задача
                 </label>
               </div>
             )}

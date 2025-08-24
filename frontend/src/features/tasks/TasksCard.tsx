@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { TaskDetailDialog } from './TaskDetailDialog'
+import { QuickAddTaskDialog } from './QuickAddTaskDialog'
 import { Pencil, Trash2, Plus, X, Kanban, Play, Pause } from 'lucide-react'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Select } from '@/components/Select'
@@ -23,6 +24,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { useAuth } from '@/stores/useAuth'
 import { Link } from 'react-router-dom'
 import { EmptyState } from '@/components/ui/empty-state'
+import { useFinance } from '@/stores/useFinance'
 
 const priorityColors: Record<Priority, string> = {
   L: 'border-green-300 dark:border-green-500/50 shadow-[0_0_0_1px_rgba(34,197,94,0.15)]',
@@ -94,7 +96,7 @@ function TaskItem({ task, employees, projects, onToggle, onDelete, onEdit, onOpe
               {priorityLabels[task.priority]}
             </span>
             <span className="px-2 py-1 rounded bg-gray-100 text-gray-800 dark:bg-gray-500/10 dark:text-gray-300 dark:ring-1 dark:ring-gray-500/20">
-              ⏱ {(task.hours_spent || 0)} ч
+              ⏱ {task.hours_spent || 0}/{(task as any).estimated_hours || 0} ч
             </span>
             {isAdmin && task.billable && (
               <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300 dark:ring-1 dark:ring-green-500/20">
@@ -157,6 +159,7 @@ export function TasksCard() {
   const update = useTasks((s) => s.update)
   const remove = useTasks((s) => s.remove)
   const fetchTasks = useTasks((s) => s.fetchTasks)
+  const fetchFinance = useFinance((s) => s.fetch)
   const employees = useEmployees((s) => s.employees)
   const fetchEmployees = useEmployees((s) => s.fetchEmployees)
   const projects = useProjects((s) => s.projects)
@@ -176,6 +179,7 @@ export function TasksCard() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailTask, setDetailTask] = useState<Task | null>(null)
   const [detailEditMode, setDetailEditMode] = useState(false)
+  const [quickAddOpen, setQuickAddOpen] = useState(false)
 
   // Load data on mount
   useEffect(() => {
@@ -255,7 +259,7 @@ export function TasksCard() {
     try {
       await toggle(taskId)
       // refresh finance to reflect auto-generated expense
-      try { (await import('@/stores/useFinance')).useFinance.getState().fetch().catch(()=>{}) } catch {}
+      try { await fetchFinance() } catch {}
     } catch (error) {
       console.error('Failed to toggle task:', error)
     }
@@ -278,31 +282,9 @@ export function TasksCard() {
           {isAdmin && (
             <button
               className="h-8 px-3 rounded border text-sm inline-flex items-center gap-2 hover:bg-muted/40"
-              onClick={() => {
-                setShowAddForm((prev: boolean) => {
-                  const next = !prev
-                  if (next) {
-                    setContent('')
-                    setPriority('M')
-                    setDue('')
-                    setAssignedTo('')
-                    setProjectId('')
-                    // scroll to top inside card viewport and focus the input
-                    setTimeout(() => {
-                      try {
-                        const card = document.querySelector('[data-module-id="tasks"]') as HTMLElement | null
-                        const vp = card?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
-                        if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' })
-                        const input = card?.querySelector('input[placeholder="Что нужно сделать..."]') as HTMLInputElement | null
-                        if (input) input.focus()
-                      } catch {}
-                    }, 0)
-                  }
-                  return next
-                })
-              }}
+              onClick={() => setQuickAddOpen(true)}
             >
-              {showAddForm ? (<><X className="h-4 w-4" /> Отмена</>) : (<><Plus className="h-4 w-4" /> Добавить</>)}
+              <Plus className="h-4 w-4" /> Добавить
             </button>
           )}
         </div>
@@ -338,10 +320,15 @@ export function TasksCard() {
           employees={employees}
           projects={projects}
           onClose={() => { setDetailOpen(false); setDetailEditMode(false); }}
-          onEdit={async (t) => { try { await update(t.id, { content: t.content, priority: t.priority, due_date: t.due_date, assigned_to: t.assigned_to, project_id: t.project_id, hours_spent: t.hours_spent, billable: t.billable, cost_rate_override: (t as any).cost_rate_override, bill_rate_override: (t as any).bill_rate_override, work_status: (t as any).work_status }); } catch {} }}
+          onEdit={async (t) => { try { await update(t.id, { content: t.content, priority: t.priority, due_date: t.due_date, assigned_to: t.assigned_to, project_id: t.project_id, hours_spent: t.hours_spent, billable: t.billable, cost_rate_override: (t as any).cost_rate_override, bill_rate_override: (t as any).bill_rate_override, work_status: (t as any).work_status }); await fetchFinance().catch(()=>{}) } catch {} }}
           onToggle={(id) => onToggle(id)}
           onDelete={(id) => { setDetailOpen(false); onDelete(id) }}
           startInEditMode={detailEditMode}
+        />
+
+        <QuickAddTaskDialog
+          open={quickAddOpen}
+          onClose={() => setQuickAddOpen(false)}
         />
 
         {showAddForm && (

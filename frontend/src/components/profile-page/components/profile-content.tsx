@@ -1,5 +1,5 @@
 import { Shield, Key, Trash2 } from "lucide-react";
-import React, { useState, useRef, useImperativeHandle } from "react";
+import React, { useState, useRef, useImperativeHandle, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from '@/stores/useAuth';
 import { API_BASE_URL } from '@/lib/api';
 import { toast } from 'sonner';
+import { inviteApi } from '@/lib/api'
+import { formatDateTime } from '@/lib/format'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 export interface ProfileContentHandle {
   save: () => Promise<void>
@@ -53,6 +56,32 @@ const ProfileContent = React.forwardRef<ProfileContentHandle, ProfileContentProp
   const [pushNotifications, setPushNotifications] = useState(false);
   const [weeklySummary, setWeeklySummary] = useState(true);
   const [loginNotifications, setLoginNotifications] = useState(true);
+
+  // --- Invites state ---
+  const [invites, setInvites] = useState<Array<{ id: number; code: string; is_active: boolean; created_at: string }>>([])
+  const [loadingInvites, setLoadingInvites] = useState(false)
+  const [creatingInvite, setCreatingInvite] = useState(false)
+
+  async function loadInvites() {
+    if (!token) return
+    try {
+      setLoadingInvites(true)
+      const rows = await inviteApi.list()
+      setInvites(rows as any)
+    } catch (e: any) {
+      // ignore 403 silently for non-owner/admin
+      const msg = e?.message || ''
+      if (!/403/.test(msg)) console.error(e)
+    } finally {
+      setLoadingInvites(false)
+    }
+  }
+
+  useEffect(() => {
+    // fetch invites when opening security tab component mounts
+    loadInvites()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (!user) return null;
 
@@ -397,6 +426,80 @@ const ProfileContent = React.forwardRef<ProfileContentHandle, ProfileContentProp
                     Просмотр сессий
                   </Button>
                 </div>
+                {/* Invite Codes */}
+                {user?.role && (user.role === 'owner' || user.role === 'admin') && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <Label className="text-base">Коды приглашения</Label>
+                        <p className="text-muted-foreground text-sm">
+                          Поделитесь кодом с сотрудником — он сможет зарегистрироваться. Первый зарегистрированный автоматически получает роль владельца.
+                        </p>
+                      </div>
+                      <Button disabled={creatingInvite} onClick={async () => {
+                        try {
+                          setCreatingInvite(true)
+                          const created = await inviteApi.create()
+                          setInvites((prev) => [created as any, ...prev])
+                          toast.success('Код создан')
+                        } catch (e) {
+                          toast.error('Не удалось создать код')
+                        } finally {
+                          setCreatingInvite(false)
+                        }
+                      }}>Создать код</Button>
+                    </div>
+
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[160px]">Код</TableHead>
+                            <TableHead>Статус</TableHead>
+                            <TableHead>Создан</TableHead>
+                            <TableHead className="w-[220px]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {invites.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={4} className="text-center text-muted-foreground">Нет кодов</TableCell>
+                            </TableRow>
+                          )}
+                          {invites.map((inv) => (
+                            <TableRow key={inv.id}>
+                              <TableCell className="font-mono">{inv.code}</TableCell>
+                              <TableCell>{inv.is_active ? 'активен' : 'деактивирован'}</TableCell>
+                              <TableCell>{formatDateTime(inv.created_at)}</TableCell>
+                              <TableCell>
+                                <div className="flex gap-2 justify-end">
+                                  <Button variant="outline" size="sm" onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(inv.code)
+                                      toast.success('Код скопирован')
+                                    } catch {
+                                      toast.error('Не удалось скопировать')
+                                    }
+                                  }}>Копировать</Button>
+                                  <Button variant="outline" size="sm" disabled={!inv.is_active}
+                                    onClick={async () => {
+                                      try {
+                                        const res = await inviteApi.deactivate(inv.id)
+                                        setInvites((prev) => prev.map((r) => r.id === inv.id ? (res as any) : r))
+                                        toast.success('Код деактивирован')
+                                      } catch {
+                                        toast.error('Не удалось деактивировать')
+                                      }
+                                    }}>Деактивировать</Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

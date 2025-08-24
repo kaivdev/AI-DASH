@@ -10,6 +10,7 @@ import { ConfirmDialog } from '@/app/ConfirmDialog'
 import { useProjects } from '@/stores/useProjects'
 import { TagCombobox } from '@/components/ui/tag-combobox'
 import { formatDate } from '@/lib/format'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 interface ProjectDetailDrawerProps {
   open: boolean
@@ -45,6 +46,9 @@ interface ProjectDetailDrawerProps {
   const [confirmFinishOpen, setConfirmFinishOpen] = useState(false)
   const [finPeriod, setFinPeriod] = useState<'7'|'30'|'90'|'all'>('7')
   const setMemberRates = useProjects((s)=> (s as any).setMemberRates)
+  // delete confirmation
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   useEffect(() => {
     if (project) {
@@ -182,8 +186,9 @@ interface ProjectDetailDrawerProps {
                const allProjectTasks = tasks.filter(t => t.project_id === p.id)
                const totalOpen = allProjectTasks.filter(t => !t.done).length
                const totalDone = allProjectTasks.filter(t => t.done).length
-               const totalHours = allProjectTasks.reduce((s, t) => s + (t.hours_spent || 0), 0)
-               const totalMoney = allProjectTasks.filter(t => t.billable).reduce((s, t) => s + ((((t as any).applied_bill_rate ?? (t as any).bill_rate_override) ?? 0) * (t.hours_spent || 0)), 0)
+               const approvedDone = allProjectTasks.filter(t => t.done && (t as any).approved === true)
+               const totalHours = approvedDone.reduce((s, t) => s + (t.hours_spent || 0), 0)
+               const totalMoney = txs.filter(tx => (tx as any).project_id === p.id && (tx as any).transaction_type === 'income').reduce((s, tx) => s + tx.amount, 0)
                
                return (
                  <div className="mb-3 p-3 rounded border bg-muted/5">
@@ -206,8 +211,9 @@ interface ProjectDetailDrawerProps {
                  const memberTasks = tasks.filter(t => t.project_id === p.id && t.assigned_to === id)
                  const open = memberTasks.filter(t=>!t.done).length
                  const done = memberTasks.filter(t=>t.done).length
-                 const hours = memberTasks.reduce((s,t)=> s + (t.hours_spent||0), 0)
-                 const money = memberTasks.filter(t=>t.billable).reduce((s,t)=> s + ((((t as any).applied_bill_rate ?? (t as any).bill_rate_override) ?? 0) * (t.hours_spent||0)), 0)
+                 const approvedMemberTasks = memberTasks.filter(t=> t.done && (t as any).approved === true)
+                 const hours = approvedMemberTasks.reduce((s,t)=> s + (t.hours_spent||0), 0)
+                 const money = txs.filter(tx => (tx as any).project_id === p.id && (tx as any).employee_id === id && (tx as any).transaction_type === 'income').reduce((s,tx)=> s + tx.amount, 0)
                  const emp = employees.find(e=>e.id===id)
                  return (
                    <div key={id} className="flex items-center justify-between">
@@ -336,9 +342,32 @@ interface ProjectDetailDrawerProps {
               }} title={p.status==='completed'?'Открыть проект':'Завершить проект'} aria-label="Переключить статус">
                 {p.status==='completed' ? 'Открыть' : 'Завершить'}
               </button>
-             <button className="h-8 w-8 rounded border inline-flex items-center justify-center" onClick={() => onRemove(p.id)} title="Удалить" aria-label="Удалить">
+            <button className="h-8 w-8 rounded border inline-flex items-center justify-center" onClick={() => { setConfirmDeleteOpen(true); setDeleteConfirmText('') }} title="Удалить" aria-label="Удалить">
                <Trash2 className="h-4 w-4" />
              </button>
+            <AlertDialog open={confirmDeleteOpen} onOpenChange={(o)=>{ if(!o){ setConfirmDeleteOpen(false); setDeleteConfirmText('') } }}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Удалить проект?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Это действие нельзя отменить. Проект будет удален.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="px-1 pb-2">
+                  <div className="text-sm mb-2">Для подтверждения удаления введите слово <span className="font-semibold">"удалить"</span>.</div>
+                  <input
+                    className="h-9 px-3 rounded border bg-background w-full text-sm"
+                    placeholder="Введите: удалить"
+                    value={deleteConfirmText}
+                    onChange={(e)=> setDeleteConfirmText(e.target.value)}
+                  />
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel onClick={()=> setConfirmDeleteOpen(false)}>Отмена</AlertDialogCancel>
+                  <AlertDialogAction disabled={deleteConfirmText.trim().toLowerCase() !== 'удалить'} onClick={async ()=>{ setConfirmDeleteOpen(false); await onRemove(p.id) }}>Удалить</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
            </div>
         </div>
       ) : (

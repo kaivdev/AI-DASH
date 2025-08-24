@@ -19,6 +19,7 @@ import cssLang from 'highlight.js/lib/languages/css'
 import type { Note } from '@/types/core'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { useAuth } from '@/stores/useAuth'
 
 type Mode = 'view' | 'edit' | 'create'
 
@@ -37,6 +38,8 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
   const [isEditing, setIsEditing] = React.useState<boolean>(true)
   const [title, setTitle] = React.useState<string>(note?.title || '')
   const [shared, setShared] = React.useState<boolean>(!!note?.shared)
+  const user = useAuth((s) => s.user)
+  const isAdmin = !!user?.role && (user.role === 'owner' || user.role === 'admin')
   // Регистрация языков для highlight.js (однократно)
   React.useEffect(() => {
     try {
@@ -165,10 +168,12 @@ export function NotesDrawer({ open, onClose, note, mode, onCreate, onUpdate }: N
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <label className="flex items-center gap-2 text-sm">
-            <Switch checked={shared} onCheckedChange={setShared} />
-            <span>Поделиться со всеми</span>
-          </label>
+          {isAdmin && (
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={shared} onCheckedChange={setShared} />
+              <span>Поделиться со всеми</span>
+            </label>
+          )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Закрыть</Button>
             {isCreate ? (

@@ -75,6 +75,11 @@ const navigation = [
     url: '/kanban',
     icon: Calendar,
   },
+  {
+    title: 'Профиль',
+    url: '/account',
+    icon: User,
+  },
 ]
 
 export function AppSidebar() {

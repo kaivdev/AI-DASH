@@ -1,13 +1,17 @@
-import React from 'react'
+import * as React from 'react'
 import dayjs from 'dayjs'
+import 'dayjs/locale/ru'
 import { ChevronDownIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
+
+// Set dayjs to use Russian locale
+dayjs.locale('ru')
 
 interface Props {
   date?: Date
-  onDateChange?: (d: Date | undefined) => void
+  onDateChange?: (date?: Date) => void
   placeholder?: string
   className?: string
   disabled?: boolean
@@ -15,7 +19,7 @@ interface Props {
 
 export function DatePicker({ date, onDateChange, placeholder, className, disabled }: Props) {
   const [open, setOpen] = React.useState(false)
-  const label = date ? dayjs(date).format('DD.MM.YYYY') : (placeholder ?? 'Select date')
+  const label = date ? dayjs(date).format('DD MMMM YYYY') : (placeholder ?? 'Выберите дату')
 
   return (
     <Popover open={open} onOpenChange={setOpen} modal>
@@ -34,8 +38,7 @@ export function DatePicker({ date, onDateChange, placeholder, className, disable
         align="start"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
-        onFocusOutside={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
+        onInteractOutside={() => setOpen(false)}
       >
         <Calendar
           mode="single"

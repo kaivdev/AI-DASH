@@ -105,10 +105,10 @@ export function KanbanCard({
           </span>
           
           {/* Часы работы */}
-          {task.hours_spent > 0 && (
+          {((task.hours_spent || 0) > 0 || ((task as any).estimated_hours || 0) > 0) && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="h-3 w-3" />
-              {task.hours_spent}ч
+              {task.hours_spent || 0}/{(task as any).estimated_hours || 0}ч
             </div>
           )}
         </div>

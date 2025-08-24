@@ -310,8 +310,15 @@ def list_invites(authorization: Optional[str] = Header(None), db: Session = Depe
     # Получить всех пользователей из той же организации
     org_users = db.execute(_text("SELECT id FROM users WHERE organization_id = :org_id"), {"org_id": user.organization_id}).fetchall()
     org_user_ids = [row[0] for row in org_users]
+
+    # Миграция: присвоить текущего пользователя как создателя для старых кодов без владельца
+    try:
+        db.execute(_text("UPDATE registration_codes SET created_by_user_id = :uid WHERE created_by_user_id IS NULL"), {"uid": user.id})
+        db.commit()
+    except Exception:
+        db.rollback()
     
-    # Фильтровать коды по создателям из той же организации
+    # Фильтровать коды по создателям из той же организации (после миграции)
     rows = db.query(models.RegistrationCode).filter(
         models.RegistrationCode.created_by_user_id.in_(org_user_ids)
     ).order_by(models.RegistrationCode.created_at.desc()).all()
@@ -334,17 +341,11 @@ def create_invite(payload: schemas.InviteCodeCreate, authorization: Optional[str
     existing = db.query(models.RegistrationCode).filter(models.RegistrationCode.code == code).first()
     if existing:
         raise HTTPException(status_code=400, detail="Code already exists")
-    # Insert first, then set created_by_user_id via UPDATE for backward DBs
-    rc = models.RegistrationCode(code=code, is_active=True)
+    # Insert with creator set to scope by organization
+    rc = models.RegistrationCode(code=code, is_active=True, created_by_user_id=user.id)
     db.add(rc)
     db.commit()
     db.refresh(rc)
-    # Try to set created_by_user_id if column exists
-    try:
-        db.execute(_text("UPDATE registration_codes SET created_by_user_id = :uid WHERE id = :rid"), {"uid": user.id, "rid": rc.id})
-        db.commit()
-    except Exception:
-        db.rollback()
     return {"id": rc.id, "code": rc.code, "is_active": bool(rc.is_active), "created_at": rc.created_at}
 
 @app.put("/api/invites/{invite_id}/deactivate", response_model=schemas.InviteCodeOut)
@@ -448,21 +449,41 @@ def logout(authorization: Optional[str] = Header(None), db: Session = Depends(ge
 # Employee endpoints
 @app.get("/api/employees", response_model=List[schemas.Employee])
 def get_employees(db: Session = Depends(get_db), authorization: Optional[str] = Header(None)):
+    def attach_avatar(employees: list[models.Employee]):
+        # Build map user_id -> avatar_url
+        if not employees:
+            return []
+        user_ids = [e.user_id for e in employees if getattr(e, 'user_id', None)]
+        if not user_ids:
+            return employees
+        profiles = (
+            db.query(models.UserProfile)
+            .filter(models.UserProfile.user_id.in_(user_ids))
+            .all()
+        )
+        avatar_by_user = {p.user_id: p.avatar_url for p in profiles}
+        # Attach attribute dynamically so Pydantic can include it
+        for e in employees:
+            if getattr(e, 'user_id', None) and hasattr(e, '__dict__'):
+                e.__dict__['avatar_url'] = avatar_by_user.get(e.user_id)
+        return employees
+
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
         user = crud.get_user_by_token(db, token)
         if user:
             # Owners/admins: вся организация
             if user.role in ("owner", "admin"):
-                return (
+                emps = (
                     db.query(models.Employee)
                     .filter(models.Employee.organization_id == user.organization_id)
                     .order_by(models.Employee.created_at.desc())
                     .all()
                 )
+                return attach_avatar(emps)
             # Обычный пользователь: только собственная карточка
             emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
-            return [emp] if emp else []
+            return attach_avatar([emp]) if emp else []
     # Без авторизации: пусто
     return []
 
@@ -631,7 +652,8 @@ def get_employee_stats(
     ).all()
     
     # Calculate statistics
-    total_hours = sum(task.hours_spent for task in tasks)
+    approved_done_tasks = [t for t in tasks if getattr(t, "done", False) and bool(getattr(t, "approved", False))]
+    total_hours = sum(task.hours_spent for task in approved_done_tasks)
     completed_tasks = sum(1 for task in tasks if task.done)
     in_progress_tasks = sum(1 for task in tasks if not task.done)
     
@@ -1189,6 +1211,18 @@ def update_task(task_id: str, task: schemas.TaskUpdate, db: Session = Depends(ge
             db_task = crud.get_task(db, task_id)
     except Exception:
         pass
+
+    # Rollback finance when leaving approved/done state
+    try:
+        if not getattr(db_task, "done", False):
+            crud.rollback_task_finance_if_any(db, task_id)
+        else:
+            # if explicitly unapproved or currently not approved -> rollback as well
+            if (has_approved_explicit and approved_value is False) or not bool(getattr(db_task, "approved", False)):
+                crud.rollback_task_finance_if_any(db, task_id)
+    except Exception:
+        pass
+
     # If task is done and approved -> ensure finance records are generated (idempotent)
     try:
         if getattr(db_task, "done", False) and bool(getattr(db_task, "approved", False)):
@@ -1244,6 +1278,8 @@ def toggle_task(task_id: str, db: Session = Depends(get_db), authorization: Opti
         else:
             with engine.begin() as conn:
                 conn.execute(_text("UPDATE tasks SET approved = FALSE, approved_at = NULL WHERE id = :id"), {"id": task_id})
+            # rollback finance when reopening
+            crud.rollback_task_finance_if_any(db, task_id)
     except Exception:
         pass
 
@@ -1418,6 +1454,16 @@ def create_note(note: schemas.NoteCreate, db: Session = Depends(get_db), authori
     user = crud.get_user_by_token(db, token)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Для обычных пользователей: требуется карточка сотрудника; shared принудительно False
+    if user.role not in ("owner", "admin"):
+        emp = db.query(models.Employee).filter(models.Employee.user_id == user.id).first()
+        if not emp:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        data = note.model_dump()
+        data["shared"] = False
+        note = schemas.NoteCreate(**data)
+
     return crud.create_note(db, note, user_id=user.id)
 
 @app.put("/api/notes/{note_id}", response_model=schemas.Note)
